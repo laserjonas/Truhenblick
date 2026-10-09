@@ -2,35 +2,28 @@ import { useMemo } from 'react';
 import type { Artikel } from '../../shared/types.ts';
 import { STATUS_FLAECHE } from '../components/ArtikelChip.tsx';
 import { StatusSymbol } from '../components/Icons.tsx';
-import { KategorieFilter } from '../components/KategorieFilter.tsx';
-import { Suchleiste } from '../components/Suchleiste.tsx';
+import { InstallHinweis } from '../components/InstallHinweis.tsx';
+import { Kopfzeile, type FilterZustand } from '../components/Kopfzeile.tsx';
 import { TruhenGrafik } from '../components/TruhenGrafik.tsx';
 import { useArtikelJeBereich, useDaten } from '../hooks/useDaten.tsx';
-import { gehe } from '../hooks/useRoute.ts';
+import { ersetze, gehe } from '../hooks/useRoute.ts';
 import { restText, resttage, STATUS_NAME, statusAusResttagen, statusVon, type Status } from '../logic/haltbarkeit.ts';
 import { sucheArtikel } from '../logic/suche.ts';
 import { OHNE_BEREICH } from '../logic/truhe.ts';
-
-interface Props {
-  suche: string;
-  setSuche: (wert: string) => void;
-  kategorie: string | null;
-  setKategorie: (wert: string | null) => void;
-}
 
 const MAX_TREFFER = 6;
 const AMPEL: Status[] = ['frisch', 'bald', 'ueberfaellig'];
 
 /** Startseite: die Truhe von oben, mit Suche und Kategoriefilter. */
-export function TruhePage({ suche, setSuche, kategorie, setKategorie }: Props) {
+export function TruhePage({ filter }: { filter: FilterZustand }) {
   const { artikel, bereiche, struktur, heute, ortVon } = useDaten();
+  const { suche, kategorie } = filter;
 
   const gefiltert = useMemo(
     () => (kategorie ? artikel.filter((a) => a.kategorie === kategorie) : artikel),
     [artikel, kategorie],
   );
   const jeBereich = useArtikelJeBereich(gefiltert);
-  const vorhanden = useMemo(() => new Set(artikel.map((a) => a.kategorie)), [artikel]);
 
   const sucht = suche.trim() !== '';
   const treffer = useMemo(() => (sucht ? sucheArtikel(gefiltert, suche) : []), [sucht, gefiltert, suche]);
@@ -59,19 +52,7 @@ export function TruhePage({ suche, setSuche, kategorie, setKategorie }: Props) {
 
   return (
     <>
-      <header className="bg-grund/95 sticky top-0 z-20 px-3 pt-[calc(0.5rem+env(safe-area-inset-top,0px))] pb-2 backdrop-blur">
-        <div className="mx-auto flex max-w-5xl flex-col gap-2">
-          <h1 className="sr-only">Truhenblick</h1>
-          <Suchleiste wert={suche} onChange={setSuche} />
-          <KategorieFilter
-            wert={kategorie}
-            onChange={setKategorie}
-            mitAlle
-            vorhanden={vorhanden}
-            beschriftung="Nach Kategorie filtern"
-          />
-        </div>
-      </header>
+      <Kopfzeile filter={filter} titel="Truhenblick" />
 
       <main className="mx-auto flex max-w-5xl flex-col gap-3 px-2 pb-44 sm:px-3">
         {sucht && <Suchergebnisse treffer={treffer} heute={heute} ortVon={ortVon} />}
@@ -94,17 +75,30 @@ export function TruhePage({ suche, setSuche, kategorie, setKategorie }: Props) {
 
         {gefiltert.length > 0 && (
           <ul className="flex flex-wrap justify-center gap-1.5" aria-label="Haltbarkeit im Überblick">
-            {AMPEL.map((s) => (
-              <li
-                key={s}
-                className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-sm font-medium ${STATUS_FLAECHE[s]}`}
-              >
-                <StatusSymbol status={s} width={15} height={15} strokeWidth={2.6} />
-                <span className="font-bold tabular-nums">{zaehler[s]}</span> {STATUS_NAME[s]}
-              </li>
-            ))}
+            {AMPEL.map((s) => {
+              const inhalt = (
+                <>
+                  <StatusSymbol status={s} width={15} height={15} strokeWidth={2.6} />
+                  <span className="font-bold tabular-nums">{zaehler[s]}</span> {STATUS_NAME[s]}
+                </>
+              );
+              const stil = `inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 text-sm font-medium ${STATUS_FLAECHE[s]}`;
+              return (
+                <li key={s}>
+                  {s === 'frisch' || zaehler[s] === 0 ? (
+                    <span className={stil}>{inhalt}</span>
+                  ) : (
+                    <button type="button" className={`${stil} min-h-11`} onClick={() => ersetze('/bald')}>
+                      {inhalt}
+                    </button>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         )}
+
+        <InstallHinweis />
       </main>
     </>
   );
@@ -127,7 +121,7 @@ function Suchergebnisse({
     );
   }
   return (
-    <section aria-label="Suchergebnisse">
+    <section aria-label="Suchergebnisse" className="px-1 sm:px-0">
       <h2 className="text-text2 mb-1.5 px-1 text-sm font-medium" role="status">
         {treffer.length === 1 ? '1 Treffer' : `${treffer.length} Treffer`} – in der Truhe markiert
       </h2>
@@ -163,7 +157,9 @@ function Suchergebnisse({
         })}
       </ul>
       {treffer.length > MAX_TREFFER && (
-        <p className="text-text2 mt-1.5 px-1 text-sm">… und {treffer.length - MAX_TREFFER} weitere</p>
+        <button type="button" className="text-akzent mt-1 min-h-11 px-1 text-sm font-semibold" onClick={() => ersetze('/liste')}>
+          Alle {treffer.length} Treffer in der Liste zeigen
+        </button>
       )}
     </section>
   );

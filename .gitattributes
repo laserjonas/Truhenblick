@@ -1,0 +1,5 @@
+# Einheitlich LF – Shell-Skripte und Dockerfiles müssen auch nach einem Checkout unter Windows laufen.
+* text=auto eol=lf
+*.png binary
+*.ico binary
+*.sqlite binary

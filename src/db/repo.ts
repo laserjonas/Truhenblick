@@ -16,6 +16,9 @@ function melde(): void {
   for (const fn of beobachter) fn();
 }
 
+/** Für Schreibvorgänge außerhalb dieser Datei (z. B. Backup einspielen). */
+export const meldeAenderung = melde;
+
 // ---------------------------------------------------------------- Artikel
 
 export type ArtikelEingabe = Pick<

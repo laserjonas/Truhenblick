@@ -64,8 +64,8 @@ describe('restText', () => {
   });
 
   it('beschreibt Überfälliges', () => {
-    expect(restText(-1)).toBe('seit 1 Tag überfällig');
-    expect(restText(-14)).toBe('seit 14 Tagen überfällig');
-    expect(restText(-120)).toBe('seit 4 Monaten überfällig');
+    expect(restText(-1)).toBe('1 Tag überfällig');
+    expect(restText(-14)).toBe('14 Tage überfällig');
+    expect(restText(-120)).toBe('4 Monate überfällig');
   });
 });

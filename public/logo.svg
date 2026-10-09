@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Truhenblick: Gefriertruhe von oben mit zwei Hängekörben und Schneeflocke -->
+  <rect width="512" height="512" rx="112" fill="#0a67a8"/>
+  <rect x="100" y="112" width="312" height="288" rx="48" fill="#0d7cc9" stroke="#fff" stroke-width="24"/>
+  <path d="M100 222h312M256 112v110" stroke="#fff" stroke-width="20"/>
+  <rect x="136" y="148" width="88" height="40" rx="20" fill="#86e3a4"/>
+  <rect x="288" y="148" width="88" height="40" rx="20" fill="#ffd76a"/>
+  <g transform="translate(256 310)" stroke="#fff" stroke-width="16" stroke-linecap="round">
+    <path d="M0-52V52M-45-26 45 26M-45 26 45-26"/>
+  </g>
+</svg>

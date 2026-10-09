@@ -40,7 +40,7 @@ function monate(tage: number): number {
   return Math.max(1, Math.round(tage / 30.44));
 }
 
-/** „noch 12 Tage“, „noch 5 Monate“, „heute fällig“, „seit 3 Tagen überfällig“ */
+/** „noch 12 Tage“, „noch 5 Monate“, „heute fällig“, „3 Tage überfällig“ */
 export function restText(rest: number): string {
   if (rest === 0) return 'heute fällig';
   if (rest > 0) {
@@ -49,9 +49,9 @@ export function restText(rest: number): string {
     return `noch ${monate(rest)} Monate`;
   }
   const seit = -rest;
-  if (seit === 1) return 'seit 1 Tag überfällig';
-  if (seit <= 60) return `seit ${seit} Tagen überfällig`;
-  return `seit ${monate(seit)} Monaten überfällig`;
+  if (seit === 1) return '1 Tag überfällig';
+  if (seit <= 60) return `${seit} Tage überfällig`;
+  return `${monate(seit)} Monate überfällig`;
 }
 
 /** „3 Monate“ / „1 Monat“ – für den Hinweis am Haltbarkeitsfeld */

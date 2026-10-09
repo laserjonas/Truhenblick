@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Blatt } from './components/Blatt.tsx';
 import { PlusIcon } from './components/Icons.tsx';
 import type { FilterZustand } from './components/Kopfzeile.tsx';
@@ -15,12 +15,16 @@ import { Einrichtung } from './pages/Einrichtung.tsx';
 import { Einstellungen } from './pages/Einstellungen.tsx';
 import { ListePage } from './pages/ListePage.tsx';
 import { TruhePage } from './pages/TruhePage.tsx';
+import { starteAutoSync } from './sync/auto.ts';
 
 function istReiter(route: Route): route is { seite: Reiter } {
   return route.seite !== 'bereich' && route.seite !== 'neu' && route.seite !== 'artikel';
 }
 
 export function App() {
+  // Abgleich mit dem Sync-Server – tut nichts, solange keiner eingerichtet ist.
+  useEffect(() => starteAutoSync(), []);
+
   return (
     <>
       <UpdateHinweis />

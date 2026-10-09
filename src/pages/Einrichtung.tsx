@@ -4,6 +4,7 @@ import { TruhenGrafik } from '../components/TruhenGrafik.tsx';
 import { Zahlwaehler } from '../components/Zahlwaehler.tsx';
 import { truheEinrichten } from '../db/repo.ts';
 import { baueStruktur, standardBereiche, type TruhenKonfig } from '../logic/truhe.ts';
+import { SyncEinstellungen } from './SyncEinstellungen.tsx';
 
 /** Baut aus dem Entwurf Bereiche mit Platzhalter-IDs für die Vorschau. */
 function vorschauBereiche(konfig: TruhenKonfig): Bereich[] {
@@ -83,6 +84,19 @@ export function Einrichtung() {
       <button type="button" className="knopf knopf-primaer mt-auto w-full" disabled={speichert} onClick={() => void anlegen()}>
         Truhe anlegen
       </button>
+
+      <details className="karte group">
+        <summary className="flex min-h-12 cursor-pointer list-none items-center px-4 py-2 font-semibold [&::-webkit-details-marker]:hidden">
+          Schon eine Truhe auf einem anderen Gerät?
+        </summary>
+        <div className="border-rand border-t p-4">
+          <p className="text-text2 mb-3 text-sm">
+            Verbinde dieses Gerät mit eurem Truhenblick-Server – die vorhandene Truhe erscheint dann von selbst. Liegt
+            dort noch keine, lege sie oben an.
+          </p>
+          <SyncEinstellungen />
+        </div>
+      </details>
     </main>
   );
 }

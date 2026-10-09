@@ -1,0 +1,11 @@
+# Zusatz für den Betrieb OHNE vorgeschalteten Reverse Proxy:
+# Caddy im Container holt selbst ein Zertifikat für die Domain aus SITE_ADDRESS.
+# Voraussetzung: Die Domain zeigt auf diesen Rechner, Ports 80 und 443 sind von außen erreichbar.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.https.yml --profile sync up -d --build
+
+services:
+  web:
+    ports:
+      - "${HTTPS_PORT:-443}:443"
+      - "${HTTPS_PORT:-443}:443/udp"

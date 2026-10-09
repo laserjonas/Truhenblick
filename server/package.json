@@ -1,0 +1,26 @@
+{
+  "name": "truhenblick-server",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Sync-Backend für Truhenblick (Hono + SQLite)",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "start": "node src/index.ts",
+    "dev": "node --watch src/index.ts",
+    "test": "node --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.4",
+    "better-sqlite3": "^13.0.3",
+    "hono": "^4.13.13"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2"
+  }
+}

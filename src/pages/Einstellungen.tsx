@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { IosAnleitung } from '../components/InstallHinweis.tsx';
 import { installiere, useInstallation } from '../hooks/useInstallation.ts';
 import { Datensicherung } from './Datensicherung.tsx';
+import { SyncEinstellungen } from './SyncEinstellungen.tsx';
 import { TruheBearbeiten } from './TruheBearbeiten.tsx';
 
 export function Abschnitt({ titel, hinweis, children }: { titel: string; hinweis?: string; children: ReactNode }) {
@@ -65,6 +66,13 @@ export function Einstellungen() {
         hinweis="Alle Daten liegen nur auf diesem Gerät. Ein Backup ist eine JSON-Datei, die du aufbewahren oder auf ein anderes Gerät übertragen kannst."
       >
         <Datensicherung />
+      </Abschnitt>
+
+      <Abschnitt
+        titel="Abgleich zwischen Geräten"
+        hinweis="Optional: Mit einem eigenen Truhenblick-Server sehen alle Geräte im Haushalt denselben Stand. Ohne Server bleibt alles auf diesem Gerät."
+      >
+        <SyncEinstellungen />
       </Abschnitt>
 
       <Abschnitt titel="App installieren" hinweis="Als App startet Truhenblick vom Home-Bildschirm und funktioniert auch ohne Internet.">

@@ -1,0 +1,14 @@
+.git
+.claude
+node_modules
+server/node_modules
+server/data
+dist
+dev-dist
+*.log
+.env
+*.sqlite
+*.sqlite-*
+README.md
+install
+deploy

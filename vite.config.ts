@@ -5,6 +5,8 @@ import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 import paket from './package.json' with { type: 'json' };
 
+const API_PROXY = { '/api': 'http://localhost:3000' };
+
 export default defineConfig({
   plugins: [
     react(),
@@ -60,6 +62,9 @@ export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(paket.version),
   },
+  // Beim Entwickeln und in der Vorschau geht /api an ein lokal gestartetes Sync-Backend (siehe server/).
+  server: { proxy: API_PROXY },
+  preview: { proxy: API_PROXY },
   test: {
     include: ['src/**/*.test.ts', 'shared/**/*.test.ts'],
   },

@@ -1,0 +1,45 @@
+# Truhenblick mit Docker Compose
+#
+#   Nur die App:            docker compose up -d --build
+#   App + Sync-Backend:     docker compose --profile sync up -d --build
+#   Mit eigenem HTTPS:      docker compose -f docker-compose.yml -f docker-compose.https.yml --profile sync up -d --build
+#
+# Einstellungen kommen aus der Datei .env (Vorlage: .env.example).
+
+name: truhenblick
+
+services:
+  web:
+    build:
+      context: .
+    image: truhenblick-web
+    restart: unless-stopped
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+      API_UPSTREAM: api:3000
+    ports:
+      - "${HTTP_BIND:-0.0.0.0}:${HTTP_PORT:-80}:80"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+
+  # Optional: nur mit --profile sync
+  api:
+    profiles: ["sync"]
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    image: truhenblick-api
+    restart: unless-stopped
+    environment:
+      SYNC_TOKEN: ${SYNC_TOKEN:-}
+      CORS_ORIGIN: ${CORS_ORIGIN:-}
+    volumes:
+      - truhenblick_daten:/data
+
+volumes:
+  # SQLite-Datenbank des Sync-Backends – das ist der Teil, den man sichern sollte.
+  truhenblick_daten:
+  # Zertifikate und Zustand von Caddy
+  caddy_data:
+  caddy_config:

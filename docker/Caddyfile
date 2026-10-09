@@ -1,0 +1,35 @@
+# Caddy im Truhenblick-Container: liefert die App aus und reicht /api an das Sync-Backend weiter.
+#
+# SITE_ADDRESS = :80              → nur HTTP, für den Betrieb hinter einem eigenen Reverse Proxy
+# SITE_ADDRESS = truhe.example.de → Caddy holt selbst ein Zertifikat (Ports 80 und 443 veröffentlichen)
+
+{$SITE_ADDRESS::80} {
+	encode zstd gzip
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		-Server
+	}
+
+	# Sync-Backend (optional). Läuft es nicht, antwortet Caddy hier mit 502 –
+	# die App funktioniert trotzdem vollständig lokal.
+	handle /api/* {
+		reverse_proxy {$API_UPSTREAM:api:3000}
+	}
+
+	handle {
+		root * /srv
+
+		# Einstiegsseite, Manifest und Service Worker immer neu prüfen, sonst kommen Updates nicht an.
+		@frisch path / /index.html /sw.js /registerSW.js /manifest.webmanifest
+		header @frisch Cache-Control "no-cache"
+
+		# Dateien unter /assets tragen einen Hash im Namen und ändern sich nie.
+		@assets path /assets/*
+		header @assets Cache-Control "public, max-age=31536000, immutable"
+
+		try_files {path} /index.html
+		file_server
+	}
+}

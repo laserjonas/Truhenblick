@@ -83,6 +83,9 @@ export const sendeAnfrage: Sende = async (konfig, anfrage) => {
   }
   if (antwort.status === 401) throw new SyncFehler('token', 'Das Zugangs-Token stimmt nicht.');
   if (antwort.status === 429) throw new SyncFehler('gesperrt', 'Zu viele Fehlversuche – bitte in einigen Minuten erneut versuchen.');
+  if ([404, 502, 503, 504].includes(antwort.status)) {
+    throw new SyncFehler('server', 'Unter dieser Adresse ist kein Truhenblick-Sync-Backend erreichbar.');
+  }
   if (!antwort.ok) throw new SyncFehler('server', `Der Server meldet einen Fehler (${antwort.status}).`);
 
   let daten: Partial<SyncAntwort>;

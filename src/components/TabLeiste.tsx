@@ -41,7 +41,6 @@ export function TabLeiste({ aktiv, faellig, ueberfaellig }: Props) {
                 aktiv === e.reiter ? 'text-akzent' : 'text-text2'
               }`}
               aria-current={aktiv === e.reiter ? 'page' : undefined}
-              aria-label={zaehler ? `${e.name}: ${faellig} Artikel` : undefined}
               onClick={() => ersetze(e.pfad)}
             >
               <span className={`relative rounded-full px-4 py-0.5 ${aktiv === e.reiter ? 'bg-akzent-weich' : ''}`}>
@@ -59,7 +58,10 @@ export function TabLeiste({ aktiv, faellig, ueberfaellig }: Props) {
                   </span>
                 )}
               </span>
-              <span className="max-w-full truncate px-0.5">{e.name}</span>
+              <span className="max-w-full truncate px-0.5">
+                {e.name}
+                {zaehler && <span className="sr-only">, {faellig} Artikel</span>}
+              </span>
             </button>
           );
         })}

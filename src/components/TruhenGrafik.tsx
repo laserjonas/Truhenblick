@@ -170,7 +170,7 @@ export function TruhenGrafik({
       <div className="flex flex-col gap-1.5 sm:gap-3">
         {struktur.koerbe.length > 0 && (
           <section aria-label="Hängekörbe">
-            <h3 className="text-text2 mb-1 px-1.5 text-[11px] font-bold tracking-wider uppercase">Hängekörbe</h3>
+            <h2 className="text-text2 mb-1 px-1.5 text-[11px] font-bold tracking-wider uppercase">Hängekörbe</h2>
             <div
               className={`grid gap-1.5 sm:gap-2 ${KORB_SPALTEN[struktur.koerbe.length] ?? 'grid-cols-2 sm:grid-cols-3'}`}
             >

@@ -1,0 +1,3 @@
+# Truhenblick ist eine private Haushalts-App – Suchmaschinen sollen sie nicht erfassen.
+User-agent: *
+Disallow: /

@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+#
+# truhenblick-update – holt die neueste Version von Truhenblick und installiert sie.
+#
+#   truhenblick-update            aktualisieren, falls es etwas Neues gibt
+#   truhenblick-update --force    auch ohne neue Version neu bauen und einrichten
+#   truhenblick-update --check    nur prüfen, ob es eine neue Version gibt
+#
+# Ablauf: neue Quellen holen → Datenbank sichern → bauen → erst dann ersetzen.
+# Schlägt der Build fehl, läuft die bisherige Version unverändert weiter.
+# Die Daten des Sync-Backends (/var/lib/truhenblick) bleiben immer erhalten.
+
+set -Eeuo pipefail
+
+QUELLE=/opt/truhenblick/src
+DATEN=/var/lib/truhenblick
+SICHERUNGEN="$DATEN/backups"
+DATENBANK="$DATEN/truhenblick.sqlite"
+ETC=/etc/truhenblick
+KONF="$ETC/install.conf"
+DIENST=truhenblick-server
+BEHALTEN=10
+
+if [[ -t 1 ]]; then
+  FETT=$'\e[1m'; ROT=$'\e[31m'; GRUEN=$'\e[32m'; GELB=$'\e[33m'; AUS=$'\e[0m'
+else
+  FETT=""; ROT=""; GRUEN=""; GELB=""; AUS=""
+fi
+schritt() { printf '%s==>%s %s\n' "$FETT" "$AUS" "$*"; }
+ok()      { printf '%s  ✓%s %s\n' "$GRUEN" "$AUS" "$*"; }
+warnung() { printf '%s  !%s %s\n' "$GELB" "$AUS" "$*" >&2; }
+abbruch() { printf '%sFehler:%s %s\n' "$ROT" "$AUS" "$*" >&2; exit 1; }
+
+ERZWINGEN=0
+NUR_PRUEFEN=0
+for arg in "$@"; do
+  case "$arg" in
+    --force) ERZWINGEN=1 ;;
+    --check) NUR_PRUEFEN=1 ;;
+    -h | --help)
+      sed -n '3,12p' "$0" | sed 's/^# \{0,1\}//'
+      exit 0
+      ;;
+    *) abbruch "Unbekannte Option: $arg (siehe truhenblick-update --help)" ;;
+  esac
+done
+
+[[ $EUID -eq 0 ]] || abbruch "Bitte als root ausführen."
+[[ -d "$QUELLE/.git" ]] || abbruch "Keine Truhenblick-Installation gefunden ($QUELLE fehlt)."
+
+TB_BRANCH=main
+TB_SYNC=0
+# shellcheck disable=SC1090
+[[ -f "$KONF" ]] && . "$KONF"
+
+version_von() {
+  git -C "$QUELLE" show "$1:package.json" 2>/dev/null | sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' | head -n1
+}
+
+# ------------------------------------------------------------------ Neue Version?
+
+schritt "Suche nach einer neuen Version"
+git -C "$QUELLE" fetch --quiet --depth 1 origin "$TB_BRANCH" ||
+  abbruch "Die Quellen sind nicht erreichbar. Besteht eine Internetverbindung?"
+
+NEU="$(git -C "$QUELLE" rev-parse FETCH_HEAD)"
+INSTALLIERT="$(cat "$ETC/version" 2>/dev/null || echo unbekannt)"
+
+if [[ "$NEU" == "$INSTALLIERT" && "$ERZWINGEN" == "0" ]]; then
+  ok "Truhenblick $(version_von "$NEU") ist bereits aktuell."
+  exit 0
+fi
+if [[ "$NEU" == "$INSTALLIERT" ]]; then
+  ok "Keine neue Version – richte $(version_von "$NEU") erneut ein (--force)."
+else
+  ok "Neue Version gefunden: $(version_von "$NEU") (${NEU:0:7}), installiert ist ${INSTALLIERT:0:7}."
+fi
+[[ "$NUR_PRUEFEN" == "1" ]] && exit 0
+
+# ------------------------------------------------------------------ Datenbank sichern
+
+sichere_datenbank() {
+  [[ -f "$DATENBANK" ]] || return 0
+  schritt "Datenbank sichern"
+  install -d -m 750 -o truhenblick -g truhenblick "$SICHERUNGEN"
+  local ziel
+  ziel="$SICHERUNGEN/truhenblick-$(date +%Y%m%d-%H%M%S).sqlite"
+  if command -v sqlite3 >/dev/null 2>&1; then
+    # .backup liefert auch bei laufendem Dienst einen in sich stimmigen Stand.
+    # Als Dienstbenutzer, damit keine Hilfsdateien der Datenbank root gehören.
+    runuser -u truhenblick -- sqlite3 "$DATENBANK" ".backup '$ziel'"
+  else
+    systemctl stop "$DIENST" 2>/dev/null || true
+    cp -a "$DATENBANK" "$ziel"
+    systemctl start "$DIENST" 2>/dev/null || true
+  fi
+  [[ -s "$ziel" ]] || abbruch "Die Sicherung ist leer – das Update wird nicht fortgesetzt."
+  chown truhenblick:truhenblick "$ziel"
+  chmod 640 "$ziel"
+  ok "Gesichert nach $ziel"
+
+  # Nur die jüngsten Sicherungen behalten
+  local alte
+  mapfile -t alte < <(find "$SICHERUNGEN" -maxdepth 1 -name 'truhenblick-*.sqlite' -printf '%f\n' | sort -r | tail -n +$((BEHALTEN + 1)))
+  local datei
+  for datei in "${alte[@]}"; do
+    [[ -n "$datei" ]] && rm -f "$SICHERUNGEN/$datei"
+  done
+  return 0
+}
+
+sichere_datenbank
+
+# ------------------------------------------------------------------ Quellen wechseln
+
+schritt "Quellen aktualisieren"
+EIGENE_AENDERUNGEN=0
+if [[ -n "$(git -C "$QUELLE" status --porcelain --untracked-files=no)" ]]; then
+  # Eigene Anpassungen (z. B. an src/config/kategorien.ts) über das Update retten
+  EIGENE_AENDERUNGEN=1
+  git -C "$QUELLE" -c user.name=truhenblick -c user.email=truhenblick@localhost stash push --quiet -m "vor Update $(date +%F)"
+fi
+git -C "$QUELLE" reset --quiet --hard "$NEU"
+if [[ "$EIGENE_AENDERUNGEN" == "1" ]]; then
+  if git -C "$QUELLE" -c user.name=truhenblick -c user.email=truhenblick@localhost stash pop --quiet 2>/dev/null; then
+    ok "Deine eigenen Anpassungen an den Quellen wurden übernommen."
+  else
+    git -C "$QUELLE" reset --quiet --hard "$NEU"
+    warnung "Deine eigenen Anpassungen passen nicht mehr zur neuen Version und wurden beiseitegelegt."
+    warnung "Ansehen:  git -C $QUELLE stash show -p     Danach erneut:  truhenblick-update --force"
+  fi
+fi
+
+# ------------------------------------------------------------------ Bauen und einrichten
+
+# Das Einrichtungsskript der NEUEN Version übernimmt den Rest (bauen, ausliefern, Dienst neu starten).
+bash "$QUELLE/install/container-setup.sh" --update
+
+printf '\n%sUpdate abgeschlossen.%s Geöffnete Apps zeigen beim nächsten Start den Hinweis „Neue Version“.\n' "$FETT$GRUEN" "$AUS"

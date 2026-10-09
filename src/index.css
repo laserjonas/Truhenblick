@@ -1,0 +1,163 @@
+@import 'tailwindcss';
+
+/* Farben als Variablen – der Dark Mode folgt der Systemeinstellung. */
+:root {
+  color-scheme: light dark;
+  --grund: #edf2f7;
+  --karte: #ffffff;
+  --mulde: #f4f7fb;
+  --rand: #c9d5e3;
+  --text: #0f1b2d;
+  --text2: #47566b;
+  --akzent: #0a67a8;
+  --akzent-text: #ffffff;
+  --akzent-weich: #dcecf9;
+  --truhe: #dce6f1;
+  --truhe-rand: #93a9c2;
+  --frisch-bg: #dcf5e3;
+  --frisch-text: #14532d;
+  --frisch-rand: #7fcf98;
+  --bald-bg: #fdf0c4;
+  --bald-text: #6b3d06;
+  --bald-rand: #e2b93b;
+  --ueber-bg: #fde0e0;
+  --ueber-text: #7a1717;
+  --ueber-rand: #ec8f8f;
+  --gefahr: #b42318;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --grund: #0b1220;
+    --karte: #141d2f;
+    --mulde: #101828;
+    --rand: #2c3b56;
+    --text: #e7eef8;
+    --text2: #a3b3c9;
+    --akzent: #5cc3f5;
+    --akzent-text: #06263a;
+    --akzent-weich: #12344d;
+    --truhe: #0f1a2c;
+    --truhe-rand: #3a4d6d;
+    --frisch-bg: #10301d;
+    --frisch-text: #b5efc6;
+    --frisch-rand: #2a7a47;
+    --bald-bg: #3a2c08;
+    --bald-text: #fbe08a;
+    --bald-rand: #8d6c14;
+    --ueber-bg: #421518;
+    --ueber-text: #fecdcd;
+    --ueber-rand: #a13a40;
+    --gefahr: #ff8a80;
+  }
+}
+
+@theme inline {
+  --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  --color-grund: var(--grund);
+  --color-karte: var(--karte);
+  --color-mulde: var(--mulde);
+  --color-rand: var(--rand);
+  --color-text: var(--text);
+  --color-text2: var(--text2);
+  --color-akzent: var(--akzent);
+  --color-akzent-text: var(--akzent-text);
+  --color-akzent-weich: var(--akzent-weich);
+  --color-truhe: var(--truhe);
+  --color-truhe-rand: var(--truhe-rand);
+  --color-frisch-bg: var(--frisch-bg);
+  --color-frisch-text: var(--frisch-text);
+  --color-frisch-rand: var(--frisch-rand);
+  --color-bald-bg: var(--bald-bg);
+  --color-bald-text: var(--bald-text);
+  --color-bald-rand: var(--bald-rand);
+  --color-ueber-bg: var(--ueber-bg);
+  --color-ueber-text: var(--ueber-text);
+  --color-ueber-rand: var(--ueber-rand);
+  --color-gefahr: var(--gefahr);
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    margin: 0;
+    min-height: 100dvh;
+    background: var(--grund);
+    color: var(--text);
+    font-family: var(--font-sans);
+    overscroll-behavior-y: none;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--akzent);
+    outline-offset: 2px;
+  }
+
+  button,
+  [role='button'] {
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+
+  button:disabled {
+    cursor: default;
+  }
+
+  /* Der Pfeil der Namensvorschläge (datalist) würde wie ein Auswahlfeld wirken. */
+  input[list]::-webkit-calendar-picker-indicator {
+    display: none !important;
+  }
+
+  /* iOS zoomt in Felder mit weniger als 16px Schrift hinein. */
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
+@layer components {
+  .knopf {
+    @apply inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl px-5 text-base font-semibold transition-colors select-none disabled:opacity-50;
+  }
+
+  /* Varianten – immer zusammen mit .knopf verwenden */
+  .knopf-primaer {
+    @apply bg-akzent text-akzent-text shadow-sm active:brightness-90;
+  }
+
+  .knopf-leise {
+    @apply border-rand bg-karte text-text active:bg-mulde border;
+  }
+
+  .knopf-gefahr {
+    @apply border-ueber-rand bg-karte text-gefahr active:bg-ueber-bg border;
+  }
+
+  .rund {
+    @apply text-text active:bg-akzent-weich inline-flex size-11 shrink-0 items-center justify-center rounded-full transition-colors disabled:opacity-40;
+  }
+
+  .feld {
+    @apply border-rand bg-karte text-text placeholder:text-text2 min-h-12 w-full rounded-2xl border px-4;
+  }
+
+  .beschriftung {
+    @apply text-text2 mb-1.5 block text-sm font-medium;
+  }
+
+  .karte {
+    @apply border-rand bg-karte rounded-2xl border;
+  }
+}
+
+@utility ohne-leiste {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}

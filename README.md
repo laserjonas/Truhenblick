@@ -492,7 +492,7 @@ npm run preview        # http://localhost:4173 – localhost gilt als sichere He
 
 ## Stand der Prüfungen
 
-Was bisher wie geprüft wurde (Stand: Version 0.2.0):
+Was bisher wie geprüft wurde (Stand: Version 0.2.1):
 
 - **App:** automatisierte Tests sowie Durchläufe im Browser (Chrome, Handy- und Desktop-Breite, hell und dunkel)
   einschließlich Offline-Betrieb und Update-Hinweis am Produktions-Build.
@@ -506,8 +506,9 @@ Was bisher wie geprüft wurde (Stand: Version 0.2.0):
   Proxmox VE 8 und ältere.
 - **Zugangscode und Aktualisierung in der App:** im Browser mit zwei Geräten durchgespielt (Code anzeigen,
   neu erzeugen, auf dem zweiten Gerät eingeben; Update anstoßen, Fortschritt, Neuladen, Fehlschlag mit
-  Protokoll). Das Anstoßen eines Updates über die Schnittstelle lief auch im Proxmox-Container, einschließlich
-  eines absichtlich fehlschlagenden Laufs.
+  Protokoll). Das Update über die Schnittstelle lief auch im Proxmox-Container: erfolgreich (rund 20 Sekunden),
+  mit einem absichtlich fehlschlagenden Lauf und mit mehreren gleichzeitigen Anfragen. Die Bedienung in der App
+  wurde dabei gegen ein Backend mit nachgestelltem Update-Dienst geprüft, nicht gegen den Container.
 - **Docker:** beide Images gebaut und als Compose-Stack gestartet (nur App, mit Sync-Backend, mit eigenem HTTPS
   über `SITE_ADDRESS`), Daten überstehen einen Neustart. ARM64 wurde unter Emulation gebaut und gestartet,
   **nicht** auf einem echten Raspberry Pi. Das Abholen eines echten Zertifikats (Let's Encrypt) ist ungetestet.

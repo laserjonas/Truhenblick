@@ -101,6 +101,14 @@ describe('Update-Dienst', () => {
     assert.equal(await d.starte(), 'laeuft');
   });
 
+  it('nimmt von mehreren gleichzeitigen Anfragen genau eine an', async () => {
+    richteEin();
+    const d = dienst();
+    const antworten = await Promise.all(Array.from({ length: 8 }, () => d.starte()));
+    assert.equal(antworten.filter((a) => a === 'gestartet').length, 1);
+    assert.equal(antworten.filter((a) => a === 'laeuft').length, 7);
+  });
+
   it('zeigt ein laufendes Update und fragt währenddessen die Quelle nicht ab', async () => {
     richteEin();
     schreibeStatus({ zustand: 'laeuft', gestartet: new Date().toISOString(), beendet: null, meldung: 'Update läuft.' });

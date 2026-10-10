@@ -171,8 +171,14 @@ export function erstelleUpdateDienst(orte: UpdateOrte, holeRemote: HoleRemote = 
   async function starte(): Promise<'gestartet' | 'laeuft' | 'nicht-moeglich'> {
     if (!eingerichtet()) return 'nicht-moeglich';
     if ((await leseStatus()).laeuft) return 'laeuft';
-    // Der Inhalt ist ohne Bedeutung – der Update-Dienst liest ihn nicht.
-    await writeFile(orte.anfrageDatei, `${new Date().toISOString()}\n`, { mode: 0o600 });
+    try {
+      // Der Inhalt ist ohne Bedeutung – der Update-Dienst liest ihn nicht.
+      // „wx“: Von mehreren gleichzeitigen Anfragen legt genau eine die Datei an.
+      await writeFile(orte.anfrageDatei, `${new Date().toISOString()}\n`, { mode: 0o600, flag: 'wx' });
+    } catch (fehler) {
+      if ((fehler as NodeJS.ErrnoException).code === 'EEXIST') return 'laeuft';
+      throw fehler;
+    }
     // Danach gilt die letzte Prüfung nicht mehr.
     pruefung = null;
     return 'gestartet';

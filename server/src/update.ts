@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { UpdateStand } from '../../shared/types.ts';
 
@@ -73,6 +73,15 @@ async function lies(datei: string): Promise<string | null> {
   }
 }
 
+/** Gibt es die Datei und ist sie jünger als die Höchstdauer eines Updates? */
+async function frisch(datei: string): Promise<boolean> {
+  try {
+    return Date.now() - (await stat(datei)).mtimeMs < LAEUFT_HOECHSTENS_MS;
+  } catch {
+    return false;
+  }
+}
+
 function wertAus(konf: string, name: string): string | null {
   return konf.match(new RegExp(`^${name}=(.+)$`, 'm'))?.[1]?.trim() ?? null;
 }
@@ -97,7 +106,9 @@ export function erstelleUpdateDienst(orte: UpdateOrte, holeRemote: HoleRemote = 
     } catch {
       // Datei wird gerade geschrieben oder ist unlesbar – wie „kein Status“ behandeln.
     }
-    const angefragt = existsSync(orte.anfrageDatei);
+    // „Unterwegs“ heißt: Anfrage liegt noch da – oder der Update-Dienst hat seine Markierung gesetzt
+    // (das tut er, bevor er die Anfrage entfernt; so gibt es keinen Moment, in dem beides fehlt).
+    const angefragt = existsSync(orte.anfrageDatei) || (await frisch(join(orte.statusVerzeichnis, 'laeuft')));
     const gestartet = typeof status.gestartet === 'string' ? Date.parse(status.gestartet) : Number.NaN;
     const laeuftLautStatus =
       status.zustand === 'laeuft' && Number.isFinite(gestartet) && Date.now() - gestartet < LAEUFT_HOECHSTENS_MS;

@@ -292,9 +292,13 @@ After=network-online.target
 [Service]
 Type=oneshot
 Environment=HOME=/root
-# Erst die Anfrage entfernen – sonst würde die .path-Unit den Dienst immer wieder starten.
-ExecStartPre=/bin/rm -f $DATEN/update-anfrage
+# Erst die Markierung „läuft“ setzen, dann die Anfrage entfernen: So ist für das Backend lückenlos
+# sichtbar, dass ein Update unterwegs ist, und ein zweites Anstoßen wird nicht angenommen. Ohne das
+# Entfernen würde die .path-Unit den Dienst immer wieder starten.
+ExecStartPre=/bin/sh -c 'touch $STATUS_VERZEICHNIS/laeuft; rm -f $DATEN/update-anfrage'
 ExecStart=/usr/local/bin/truhenblick-update --aus-app
+# Läuft auch, wenn das Skript abbricht.
+ExecStopPost=/bin/rm -f $STATUS_VERZEICHNIS/laeuft
 TimeoutStartSec=30min
 EOF
 

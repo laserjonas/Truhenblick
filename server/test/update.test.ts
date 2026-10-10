@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
@@ -108,6 +108,28 @@ describe('Update-Dienst', () => {
     assert.equal(stand.laeuft, true);
     assert.equal(stand.letztes, null);
     assert.equal(abfragen, 0);
+  });
+
+  it('nimmt kein zweites Update an, sobald der Dienst seine Markierung gesetzt hat', async () => {
+    richteEin();
+    // Der Dienst hat die Anfrage schon entfernt, das Skript aber noch keinen Status geschrieben:
+    schreibeStatus({ zustand: 'fertig', gestartet: '2026-10-10T10:00:00Z', beendet: '2026-10-10T10:01:00Z', meldung: 'Update installiert.' });
+    writeFileSync(join(orte.statusVerzeichnis, 'laeuft'), '');
+    const d = dienst();
+    const stand = await d.stand(false);
+    assert.equal(stand.laeuft, true);
+    assert.equal(stand.letztes, null);
+    assert.equal(await d.starte(), 'laeuft');
+    assert.equal(existsSync(orte.anfrageDatei), false);
+  });
+
+  it('lässt sich von einer uralten Markierung nicht blockieren', async () => {
+    richteEin();
+    const marke = join(orte.statusVerzeichnis, 'laeuft');
+    writeFileSync(marke, '');
+    const frueher = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    utimesSync(marke, frueher, frueher);
+    assert.equal((await dienst().stand(false)).laeuft, false);
   });
 
   it('hält ein vor langer Zeit hängengebliebenes Update nicht für laufend', async () => {

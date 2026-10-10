@@ -12,8 +12,13 @@ FROM node:24-alpine
 ENV NODE_ENV=production
 WORKDIR /app
 
-COPY server/package.json server/package-lock.json server/
-RUN cd server && npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
+COPY server/package.json server/package-lock.json server/.npmrc server/
+# --ignore-scripts: sonst will npm better-sqlite3 neu kompilieren, wofür hier der Compiler fehlt.
+# Der node-Aufruf prüft gleich, ob die mitgelieferte Binärdatei zu dieser Architektur passt.
+RUN cd server \
+ && npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
+ && npm cache clean --force \
+ && node -e "new (require('better-sqlite3'))(':memory:').close()"
 
 COPY shared/package.json shared/types.ts shared/sync.ts shared/validierung.ts shared/
 COPY server/src server/src

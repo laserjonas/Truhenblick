@@ -190,7 +190,12 @@ backend_einrichten() {
   mkdir -p "$APP/server" "$APP/shared"
   rsync -a --delete --exclude node_modules --exclude test --exclude data "$QUELLE/server/" "$APP/server/"
   rsync -a --delete --exclude '*.test.ts' "$QUELLE/shared/" "$APP/shared/"
-  (cd "$APP/server" && npm ci --omit=dev --no-audit --no-fund --loglevel=error)
+  # --ignore-scripts: better-sqlite3 bringt fertige Binärdateien mit; ohne den Schalter
+  # würde npm es neu kompilieren wollen, wofür im Container der Compiler fehlt.
+  npm --prefix "$APP/server" ci --omit=dev --ignore-scripts --no-audit --no-fund --loglevel=error
+  if ! (cd "$APP/server" && node -e "new (require('better-sqlite3'))(':memory:').close()") 2>/dev/null; then
+    abbruch "Die SQLite-Bibliothek lässt sich auf diesem System nicht laden (Architektur $(uname -m)). Unterstützt werden x86-64 und ARM64 (64 Bit)."
+  fi
 
   # Token: neues übernehmen, sonst vorhandenes behalten, sonst erzeugen
   local token="$TB_SYNC_TOKEN"

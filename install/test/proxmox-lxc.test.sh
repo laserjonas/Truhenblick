@@ -170,12 +170,14 @@ pruefe "Quellen werden geholt" aufruf '^pct exec 105 -- env LC_ALL=C.UTF-8 LANG=
 pruefe "Einrichtung läuft im Container" aufruf '^pct exec 105 -- env LC_ALL=C.UTF-8 LANG=C.UTF-8 bash /opt/truhenblick/src/install/container-setup.sh'
 pruefe "Übergabe: Port 80" uebergabe '^TB_PORT=80$'
 pruefe "Übergabe: Sync aktiv" uebergabe '^TB_SYNC=1$'
-pruefe "Übergabe: Token wird erzeugt (48 Hex-Zeichen)" uebergabe '^TB_SYNC_TOKEN=[0-9a-f]{48}$'
-pruefe "Token steht in keiner Befehlszeile" kein_aufruf 'TB_SYNC_TOKEN|[0-9a-f]{48}'
+pruefe "Übergabe: kein Code – er entsteht beim Anlegen der Truhe in der App" uebergabe '^TB_SYNC_TOKEN=$'
+pruefe "kein Code in einer Befehlszeile" kein_aufruf 'TB_SYNC_TOKEN'
 pruefe "kein Passwort gesetzt" kein_aufruf 'chpasswd'
 pruefe "nichts wird gelöscht" kein_aufruf '^pct destroy'
 pruefe "Adresse wird genannt" ausgabe 'http://192\.168\.1\.77'
-pruefe "Token wird am Ende gezeigt" ausgabe 'Zugangscode: +.*[0-9a-f]{48}'
+pruefe "erklärt am Ende, wie man zum Code kommt" ausgabe 'Truhe anlegen.*zeigt die App einen Code'
+pruefe "nennt, wie weitere Geräte beitreten" ausgabe 'Einer Truhe beitreten'
+pruefe "zeigt keinen Code an, wenn keiner übergeben wurde" keine_ausgabe 'Erste Truhe:'
 pruefe "Hinweis auf HTTPS" ausgabe 'HTTPS nötig'
 pruefe "Zusammenfassung wird gezeigt" ausgabe 'Container-ID: +105'
 
@@ -203,14 +205,16 @@ pruefe "Übergabe: ohne Sync" uebergabe '^TB_SYNC=0$'
 pruefe "Übergabe: kein Token" uebergabe '^TB_SYNC_TOKEN=$'
 pruefe "Übergabe: Port" uebergabe '^TB_PORT=8080$'
 pruefe "Adresse mit Port" ausgabe 'http://192\.168\.1\.77:8080'
-pruefe "kein Token-Abschnitt" keine_ausgabe 'Zugangscode'
+pruefe "ohne Abgleich kein Abschnitt dazu" keine_ausgabe 'Einer Truhe beitreten'
 pruefe "Backend wird nicht geprüft" kein_aufruf 'api/health'
 
 test_titel "Umgebungsvariablen statt Optionen"
 starte TB_YES=1 TB_HOSTNAME=keller TB_CTID=333 TB_SYNC_TOKEN=mein-eigenes-token-123 --
 pruefe "endet erfolgreich" code_ist 0
 pruefe "Werte aus der Umgebung" aufruf '^pct create 333 .*--hostname keller'
-pruefe "eigenes Token wird übergeben" uebergabe '^TB_SYNC_TOKEN=mein-eigenes-token-123$'
+pruefe "übergebener Code der ersten Truhe wird weitergereicht" uebergabe '^TB_SYNC_TOKEN=mein-eigenes-token-123$'
+pruefe "übergebener Code wird am Ende genannt" ausgabe 'Erste Truhe: +.*mein-eigenes-token-123'
+pruefe "übergebener Code steht in keiner Befehlszeile" kein_aufruf 'mein-eigenes-token-123'
 
 test_titel "Ungültige Angaben werden vor dem Anlegen abgewiesen"
 abgewiesen() {

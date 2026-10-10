@@ -124,6 +124,7 @@ export function erstelleUpdateDienst(orte: UpdateOrte, holeRemote: HoleRemote = 
     if (!eingerichtet()) {
       return {
         moeglich: false,
+        grund: 'nicht-eingerichtet',
         installiert: null,
         verfuegbar: null,
         neu: null,

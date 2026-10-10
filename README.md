@@ -11,7 +11,7 @@ Hängekörbe, Ebenen und Fächer als Kacheln, darin die Artikel als farbige Chip
 - Ampel für die Haltbarkeit (grün / gelb / rot), immer zusätzlich mit Symbol und Text
 - Suche mit Hervorhebung des Fundorts, Filter nach Kategorie, sortierbare Liste, „Bald verbrauchen“
 - Rückgängig nach Entnehmen und Ändern, JSON-Backup, Dark Mode nach Systemeinstellung
-- Optional: eigener Sync-Server, damit alle Geräte im Haushalt denselben Stand sehen
+- Optional: eigener Sync-Server – beim Anlegen einer Truhe entsteht ein Code, mit dem weitere Geräte beitreten
 
 **Inhalt:** [Lokal starten](#lokal-starten) · [Anpassen](#anpassen) · [Installation](#installation) ·
 [HTTPS und Reverse Proxy](#https-und-reverse-proxy) · [Updates](#updates) ·
@@ -46,12 +46,12 @@ Das Sync-Backend liegt in `server/` und ist ein eigenes kleines Paket:
 ```bash
 cd server
 npm install
-SYNC_TOKEN=$(openssl rand -hex 24) npm start     # lauscht auf Port 3000
+npm start                                        # lauscht auf Port 3000
 npm test
 ```
 
-Entwicklungsserver und Vorschau reichen `/api` an `http://localhost:3000` weiter. In der App trägst du unter
-*Einstellungen → Abgleich zwischen Geräten* nur noch das Token ein.
+Entwicklungsserver und Vorschau reichen `/api` an `http://localhost:3000` weiter – „Truhe anlegen“ erzeugt dann
+auch lokal einen Code.
 
 ### Aufbau
 
@@ -115,7 +115,10 @@ Zusammenfassung und legt erst nach Bestätigung los. Es
 2. erstellt und startet den Container (`pct create`, `pct start`),
 3. installiert darin Caddy, Node.js und die App (statischer Build),
 4. richtet auf Wunsch das Sync-Backend als systemd-Dienst ein,
-5. prüft, ob App und Backend antworten, und nennt Adresse und Zugangscode.
+5. prüft, ob App und Backend antworten, und nennt die Adresse.
+
+Einen Zugangscode gibt es dabei nicht: Er entsteht, wenn du in der App die Truhe anlegst
+(siehe [Abgleich zwischen Geräten](#abgleich-zwischen-geräten)).
 
 Bricht etwas ab, bietet das Skript an, den halb angelegten Container wieder zu entfernen.
 
@@ -148,7 +151,7 @@ TB_YES=1 TB_HOSTNAME=truhenblick TB_SYNC=0 bash proxmox-lxc.sh
 | `--ssh-key` | `TB_SSH_KEY` | – | SSH-Public-Key: Datei oder der Schlüssel selbst |
 | `--unprivileged` / `--privileged` | `TB_UNPRIVILEGED` | `1` | unprivilegierter Container |
 | `--with-sync` / `--no-sync` | `TB_SYNC` | `1` | Sync-Backend mitinstallieren |
-| `--sync-token` | `TB_SYNC_TOKEN` | wird erzeugt | Zugangscode, mindestens 16 Zeichen |
+| `--sync-token` | `TB_SYNC_TOKEN` | – | freiwillig: Code der ersten Truhe, mindestens 16 Zeichen |
 | `--port` | `TB_PORT` | `80` | Port der Web-App |
 | `--repo`, `--branch` | `TB_REPO`, `TB_BRANCH` | dieses Repository, `main` | Quelle der Installation |
 | `--yes` | `TB_YES` | `0` | keine Rückfragen |
@@ -203,17 +206,15 @@ Truhenblick ist fertig installiert.
   Update:         pct exec 105 -- truhenblick-update
 
   Abgleich zwischen Geräten
-  Zugangscode:    e5e08964d85871f1f0f95bf3457ab001e3d31633614f0f2f
-  In der App unter Einstellungen → „Abgleich zwischen Geräten“ eintragen.
-  Dort lässt er sich später auch anzeigen und neu erzeugen. Dieser Anfangscode
-  steht außerdem im Container in /etc/truhenblick/server.env.
+  So geht es:     1. Adresse oben öffnen und „Truhe anlegen“ – dabei zeigt die App einen Code.
+                  2. Auf jedem weiteren Gerät „Einer Truhe beitreten“ wählen und den Code eingeben.
   Datenbank:      /var/lib/truhenblick/truhenblick.sqlite (im Container)
 
   Wichtig: Für die Installation als App ist HTTPS nötig.
   …
 ```
 
-IP-Adresse und Token sind Beispiele. Auf einem Testsystem dauerte der ganze Lauf knapp zwei Minuten.
+Die IP-Adresse ist ein Beispiel. Auf einem Testsystem dauerte der ganze Lauf knapp zwei Minuten.
 
 </details>
 
@@ -235,7 +236,7 @@ hat.
 | `/opt/truhenblick/app` | laufendes Sync-Backend |
 | `/var/lib/truhenblick/truhenblick.sqlite` | **Datenbank des Sync-Backends** |
 | `/var/lib/truhenblick/backups/` | automatische Sicherungen vor Updates |
-| `/etc/truhenblick/server.env` | Anfangs-Zugangscode (`SYNC_TOKEN`) und Einstellungen des Backends |
+| `/etc/truhenblick/server.env` | Einstellungen des Backends (z. B. `NEUE_TRUHEN`) |
 | `/usr/local/bin/truhenblick-update` | Update-Skript |
 | `/var/lib/truhenblick-update/` | Stand und Protokoll des letzten Updates aus der App |
 
@@ -247,7 +248,7 @@ Dienste: `systemctl status caddy` und `systemctl status truhenblick-server`, Mel
 ```bash
 git clone https://github.com/laserjonas/Truhenblick.git
 cd Truhenblick
-cp .env.example .env          # anpassen – für den Abgleich SYNC_TOKEN setzen
+cp .env.example .env          # bei Bedarf anpassen (Port, Adresse)
 
 # nur die App
 docker compose up -d --build
@@ -344,15 +345,15 @@ Unter *Einstellungen → Aktualisierung* gibt es zwei Dinge:
 
 - **Diese App:** *Nach Updates suchen* prüft, ob auf dem Server eine neuere App liegt als die geladene, und lädt
   sie mit *App neu laden*. Das funktioniert überall, auch bei Docker und über `http://`.
-- **Server:** Ist das Gerät mit dem Sync-Backend verbunden, zeigt die App, ob es eine neue Version gibt, und
+- **Server:** Gehört das Gerät zur zuerst angelegten Truhe des Servers, zeigt die App, ob es eine neue Version gibt, und
   aktualisiert den Server mit *Jetzt aktualisieren* – derselbe Ablauf wie `truhenblick-update`, inklusive
   Sicherung der Datenbank. Scheitert das Update, läuft die bisherige Version weiter, und die App zeigt das
   Protokoll.
 
 Wie das abgesichert ist: Das Backend läuft ohne besondere Rechte und führt das Update nicht selbst aus. Es legt
 nur eine Anfragedatei ab; ein eigener systemd-Dienst (`truhenblick-update.path` / `.service`) startet daraufhin
-als root immer denselben Befehl – aus der Anfrage wird nichts übernommen. Anstoßen kann es jedes verbundene
-Gerät, also jeder mit dem Zugangscode. Geholt wird, was im eingestellten Repository und Zweig liegt
+als root immer denselben Befehl – aus der Anfrage wird nichts übernommen. Anstoßen können es nur die Geräte
+der zuerst angelegten Truhe (der des Betreibers). Geholt wird, was im eingestellten Repository und Zweig liegt
 (`TB_REPO`, `TB_BRANCH` in `/etc/truhenblick/install.conf`).
 
 Wer das nicht möchte, schaltet es ab – in `/etc/truhenblick/install.conf` `TB_APP_UPDATE=0` eintragen und einmal
@@ -409,55 +410,75 @@ Server.
 
 ## Abgleich zwischen Geräten
 
-Der Abgleich ist optional; ohne ihn arbeitet die App vollständig lokal.
+Der Abgleich ist optional; ohne ihn arbeitet die App vollständig lokal. Mit dem Sync-Backend sehen mehrere Geräte
+dieselbe Truhe.
 
-- **Einrichten:** Auf dem ersten Gerät unter *Einstellungen → Abgleich zwischen Geräten* Adresse und Zugangscode
-  eintragen. Auf jedem weiteren Gerät im Einrichtungsassistenten *„Schon eine Truhe auf einem anderen Gerät?“*
-  aufklappen – die vorhandene Truhe erscheint dann von selbst.
+### So geht es
+
+1. **Erstes Gerät:** Die App öffnen und im Startassistenten **Truhe anlegen**. Läuft auf dem Server das
+   Sync-Backend, entsteht dabei ein Code (Form `k7m2-9xqp-4hrt-w3vn-8dzj`), den die App groß anzeigt.
+2. **Jedes weitere Gerät:** Im Startassistenten **Einer Truhe beitreten** wählen und den Code eingeben – die
+   Truhe erscheint von selbst.
+
+Mehr ist nicht nötig; auf dem Server muss dafür nichts eingestellt werden.
+
+- **Schon eine Truhe auf dem Gerät?** Unter *Einstellungen → Abgleich zwischen Geräten* gibt *Truhe freigeben*
+  sie nachträglich frei (auch dabei entsteht der Code) – oder das Gerät tritt mit einem Code einer vorhandenen
+  Truhe bei; was es schon eingetragen hat, kommt dann dazu.
+- **Code vergessen?** Jedes verbundene Gerät zeigt ihn unter *Einstellungen → Abgleich zwischen Geräten →
+  Code anzeigen*.
+- **Code weitergegeben, der nicht mehr gelten soll?** *Neuen Code erzeugen*: Der bisherige gilt sofort nicht
+  mehr. Die anderen Geräte fragen beim nächsten Abgleich nach dem neuen und gleichen danach normal weiter ab;
+  ihre Daten bleiben erhalten.
+- **Trennen:** Das Gerät vergisst den Code (die App zeigt ihn vorher noch einmal an). Die Truhe bleibt auf dem
+  Server, die Daten bleiben auf dem Gerät.
+
+### Wie es funktioniert
+
+- **Truhe und Code gehören zusammen:** Ein Server kann mehrere Truhen aufnehmen, jede mit eigenem Code und
+  eigenen Daten. Der Code ist zugleich Ausweis und Angabe, um welche Truhe es geht. Auf dem Server liegt nur
+  seine Prüfsumme.
 - **Offline-first:** Jede Änderung wird sofort lokal gespeichert und übertragen, sobald der Server erreichbar
   ist – beim Start, nach Änderungen, wenn das Gerät wieder online ist und regelmäßig im Vordergrund.
 - **Konflikte:** Ändern zwei Geräte denselben Artikel, gewinnt die **spätere Änderung** (Zeitstempel
   `geaendertAm`). Das gilt für den ganzen Artikel, nicht feldweise. Die Uhren der Geräte sollten deshalb
   ungefähr stimmen.
-- **Zugang:** ein gemeinsamer Zugangscode für den Haushalt, übertragen als `Authorization: Bearer …`. Nach zehn
-  Fehlversuchen ist eine Adresse zehn Minuten gesperrt. Der Code gehört nur über HTTPS ins Internet.
-- **Schnittstelle:** `GET /api/health` (ohne Anmeldung), `POST /api/sync`, `POST /api/code` sowie
-  `GET`/`POST /api/update`.
+- **Schnittstelle:** `GET /api/health` und `POST /api/truhen` ohne Anmeldung; mit dem Code als
+  `Authorization: Bearer …`: `POST /api/sync`, `POST /api/code`, `GET`/`POST /api/update`.
 
-### Zugangscode
+### Wer darf was?
 
-Den **ersten** Code legt die Installation fest: Das Proxmox-Skript erzeugt ihn und zeigt ihn am Ende an, bei
-Docker steht er als `SYNC_TOKEN` in der `.env`. Im Container lässt er sich nachlesen:
+- **Eine neue Truhe anlegen** kann jeder, der den Server erreicht – ohne Anmeldung, denn sonst bräuchte man
+  schon vor der ersten Truhe einen Code. An eine *vorhandene* Truhe kommt man nur mit ihrem Code.
+  Begrenzt ist das auf zehn Truhen je Server und fünf neue pro Stunde und Adresse.
+  **Für Server, die aus dem Internet erreichbar sind:** nach dem Anlegen der eigenen Truhe `NEUE_TRUHEN=aus`
+  setzen (siehe unten).
+- **Einer Truhe beitreten, sie lesen und ändern, ihren Code erneuern:** jedes Gerät mit ihrem Code. Nach zehn
+  falschen Codes ist eine Adresse zehn Minuten gesperrt. Der Code gehört nur über HTTPS ins Internet.
+- **Den Server aus der App aktualisieren:** nur die Geräte der **zuerst angelegten** Truhe – sonst könnte
+  jeder mit einer eigenen Truhe Updates auslösen.
 
-```bash
-pct exec <ID> -- grep SYNC_TOKEN /etc/truhenblick/server.env
-```
+### Einstellungen des Backends
 
-Danach geht alles in der App, unter *Einstellungen → Abgleich zwischen Geräten → Zugangscode*:
-
-- **Code anzeigen** – auf jedem verbundenen Gerät, zum Abtippen auf dem nächsten.
-- **Neuen Code erzeugen** – der Server vergibt einen neuen, gut abtippbaren Code
-  (Form `k7m2-9xqp-4hrt-w3vn-8dzj`). Der bisherige gilt sofort nicht mehr; die anderen Geräte fragen beim
-  nächsten Abgleich nach dem neuen und gleichen danach normal weiter ab. Ihre Daten bleiben erhalten.
-
-Ein Gerät, das noch nie verbunden war, kann den Code nicht anzeigen – sonst könnte ihn jeder lesen, der die
-Adresse kennt.
-
-Auf dem Server liegt von einem in der App erzeugten Code nur eine Prüfsumme (in der SQLite-Datenbank).
-**Kennt kein Gerät mehr den Code**, setzt du ihn von der Serverseite zurück: in `/etc/truhenblick/server.env`
-(bei Docker in der `.env`) bei `SYNC_TOKEN` einen **neuen** Wert eintragen und den Dienst neu starten
-(`systemctl restart truhenblick-server` bzw. `docker compose --profile sync up -d`). Ein geänderter
-`SYNC_TOKEN` hat immer Vorrang vor einem in der App erzeugten Code.
-
-Einstellungen des Backends (Umgebungsvariablen):
+Umgebungsvariablen – im Proxmox-Container in `/etc/truhenblick/server.env` (danach
+`systemctl restart truhenblick-server`), bei Docker in der `.env`:
 
 | Variable | Standard | Bedeutung |
 | --- | --- | --- |
-| `SYNC_TOKEN` | – (Pflicht) | Zugangscode, mit dem der Server startet (siehe oben) |
+| `NEUE_TRUHEN` | `an` | `aus`: In der App lassen sich keine neuen Truhen mehr anlegen; vorhandene bleiben nutzbar |
+| `MAX_TRUHEN` | `10` | Höchstzahl der Truhen auf diesem Server |
+| `SYNC_TOKEN` | – | freiwillig: Zugangscode der zuerst angelegten Truhe (mindestens 16 Zeichen) |
 | `PORT` | `3000` | Port |
 | `HOST` | `0.0.0.0` | Adresse, auf der gelauscht wird |
 | `DATA_DIR` | `./data` | Verzeichnis der SQLite-Datenbank |
 | `CORS_ORIGIN` | – | nur nötig, wenn die App von einer anderen Adresse geladen wird als das Backend |
+
+**Kennt kein Gerät mehr den Code der ersten Truhe**, setzt du ihn von der Serverseite zurück: bei `SYNC_TOKEN`
+einen **neuen** Wert eintragen und den Dienst neu starten. Ein geänderter `SYNC_TOKEN` hat Vorrang vor einem
+in der App erzeugten Code; die Daten der Truhe bleiben erhalten. Für weitere Truhen gibt es diesen Weg nicht.
+
+**Von Version 0.2 kommend:** Der bisherige einzige Datenbestand wird beim ersten Start zur ersten Truhe, mit
+demselben Code. Verbundene Geräte gleichen ohne Unterbrechung weiter ab.
 
 ## PWA testen
 

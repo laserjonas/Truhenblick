@@ -55,6 +55,11 @@ export interface SyncAntwort {
 export interface UpdateStand {
   /** Lässt sich dieser Server aus der App aktualisieren? (Nicht bei Docker.) */
   moeglich: boolean;
+  /**
+   * Warum nicht: Die Einrichtung dafür fehlt (z. B. Docker) – oder diese Truhe ist nicht die
+   * zuerst angelegte; nur deren Geräte dürfen den Server aktualisieren.
+   */
+  grund?: 'nicht-eingerichtet' | 'andere-truhe' | null;
   /** Installierter Stand (Git-Commit) oder null, wenn unbekannt */
   installiert: string | null;
   /** Neuester Stand der Quelle oder null, wenn sie nicht erreichbar war */

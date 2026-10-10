@@ -15,7 +15,7 @@
 # Einstellungen (Umgebungsvariablen, sonst gespeicherte Werte, sonst Standard):
 #   TB_PORT        Port der Web-App                         (80)
 #   TB_SYNC        1 = Sync-Backend installieren, 0 = ohne  (0)
-#   TB_SYNC_TOKEN  Zugangscode; leer = behalten bzw. neu erzeugen
+#   TB_SYNC_TOKEN  freiwillig: Zugangscode der ersten Truhe (sonst entsteht er in der App)
 #   TB_REPO        Git-Adresse der Quellen
 #   TB_BRANCH      Zweig                                    (main)
 #   TB_APP_UPDATE  1 = Updates lassen sich in der App anstoßen, 0 = nur von Hand (1)
@@ -171,8 +171,10 @@ app_bauen() {
 
 # ------------------------------------------------------------------ Sync-Backend
 
-token_erzeugen() {
-  openssl rand -hex 24 2>/dev/null || head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n'
+# Liest einen Wert aus der vorhandenen server.env (leer, wenn es Datei oder Eintrag nicht gibt).
+aus_server_env() {
+  [[ -f "$SERVER_ENV" ]] || return 0
+  sed -n "s/^$1=//p" "$SERVER_ENV" | head -n1
 }
 
 dienst_antwortet() {
@@ -204,16 +206,16 @@ backend_einrichten() {
     abbruch "Die SQLite-Bibliothek lässt sich auf diesem System nicht laden (Architektur $(uname -m)). Unterstützt werden x86-64 und ARM64 (64 Bit)."
   fi
 
-  # Token: neues übernehmen, sonst vorhandenes behalten, sonst erzeugen
+  # Zugangscodes entstehen beim Anlegen einer Truhe in der App – hier wird keiner erzeugt.
+  # SYNC_TOKEN ist freiwillig (Code der ersten Truhe): ein übergebener gilt, ein vorhandener bleibt.
   local token="$TB_SYNC_TOKEN"
-  if [[ -z "$token" && -f "$SERVER_ENV" ]]; then
-    token="$(sed -n 's/^SYNC_TOKEN=//p' "$SERVER_ENV" | head -n1)"
-  fi
-  if [[ -z "$token" ]]; then
-    token="$(token_erzeugen)"
-    TOKEN_NEU=1
-  fi
+  [[ -n "$token" ]] && TOKEN_NEU=1
+  [[ -z "$token" ]] && token="$(aus_server_env SYNC_TOKEN)"
   SYNC_TOKEN_AKTUELL="$token"
+  # Eigene Einstellungen in der Datei über Updates hinweg erhalten
+  local neue_truhen max_truhen
+  neue_truhen="$(aus_server_env NEUE_TRUHEN)"
+  max_truhen="$(aus_server_env MAX_TRUHEN)"
 
   local alt_umask
   alt_umask="$(umask)"
@@ -221,7 +223,16 @@ backend_einrichten() {
   cat >"$SERVER_ENV" <<EOF
 # Einstellungen des Truhenblick-Sync-Backends.
 # Nach Änderungen:  systemctl restart $DIENST
+
+# Dürfen in der App neue Truhen angelegt werden? (an/aus) Vorhandene bleiben in jedem Fall nutzbar.
+NEUE_TRUHEN=${neue_truhen:-an}
+# Höchstzahl der Truhen auf diesem Server
+MAX_TRUHEN=${max_truhen:-10}
+
+# Freiwillig: Zugangscode der zuerst angelegten Truhe (mindestens 16 Zeichen). Einen neuen Wert
+# eintragen, um ihn zurückzusetzen, wenn kein Gerät den Code mehr kennt.
 SYNC_TOKEN=$token
+
 PORT=$BACKEND_PORT
 HOST=127.0.0.1
 DATA_DIR=$DATEN
@@ -459,14 +470,16 @@ VERSION="$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$QUELLE/package.json" | 
 printf '\n%sTruhenblick %s ist eingerichtet.%s\n' "$FETT$GRUEN" "$VERSION" "$AUS"
 printf '  Adresse:   %s\n' "$(adresse)"
 if [[ "$TB_SYNC" == "1" ]]; then
-  if [[ "$MODUS" == "install" || "$TOKEN_NEU" == "1" ]]; then
-    printf '  Sync:      aktiv – Zugangscode: %s%s%s\n' "$FETT" "$SYNC_TOKEN_AKTUELL" "$AUS"
-    printf '             (steht auch in %s; in der App lässt er sich\n' "$SERVER_ENV"
-    printf '             später anzeigen und neu erzeugen)\n'
+  if [[ "$TOKEN_NEU" == "1" ]]; then
+    printf '  Abgleich:  aktiv – Code der ersten Truhe: %s%s%s\n' "$FETT" "$SYNC_TOKEN_AKTUELL" "$AUS"
+    printf '             (steht in %s)\n' "$SERVER_ENV"
+  elif [[ "$MODUS" == "install" ]]; then
+    printf '  Abgleich:  aktiv – beim Anlegen einer Truhe in der App entsteht der Code,\n'
+    printf '             mit dem weitere Geräte beitreten\n'
   else
-    printf '  Sync:      aktiv – Zugangscode unverändert\n'
+    printf '  Abgleich:  aktiv – Truhen und Zugangscodes unverändert\n'
   fi
 else
-  printf '  Sync:      nicht installiert\n'
+  printf '  Abgleich:  nicht installiert\n'
 fi
 printf '  Update:    truhenblick-update\n'

@@ -3,6 +3,7 @@ import type { Artikel } from '../../shared/types.ts';
 import { STATUS_FLAECHE } from '../components/ArtikelChip.tsx';
 import { StatusSymbol } from '../components/Icons.tsx';
 import { InstallHinweis } from '../components/InstallHinweis.tsx';
+import { NeueTruheHinweis } from '../components/NeueTruheHinweis.tsx';
 import { Kopfzeile, type FilterZustand } from '../components/Kopfzeile.tsx';
 import { TruhenGrafik } from '../components/TruhenGrafik.tsx';
 import { useArtikelJeBereich, useDaten } from '../hooks/useDaten.tsx';
@@ -55,6 +56,8 @@ export function TruhePage({ filter }: { filter: FilterZustand }) {
       <Kopfzeile filter={filter} titel="Truhenblick" />
 
       <main className="mx-auto flex max-w-5xl flex-col gap-3 px-2 pb-44 sm:px-3">
+        <NeueTruheHinweis />
+
         {sucht && <Suchergebnisse treffer={treffer} heute={heute} ortVon={ortVon} />}
 
         {artikel.length === 0 && (

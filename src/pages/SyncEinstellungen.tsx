@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { CodeAnzeige, CodeFeld } from '../components/CodeAnzeige.tsx';
 import { datumAnzeige, heuteIso } from '../logic/datum.ts';
-import { gleicheAb, neuerCode, setzeCode, trenne, useSyncStatus, verbinde } from '../sync/auto.ts';
-import { gespeicherterCode, normalisiereUrl, SyncFehler } from '../sync/client.ts';
+import { gebeFrei, gleicheAb, neuerCode, setzeCode, trenne, useSyncStatus, verbinde } from '../sync/auto.ts';
+import { gespeicherterCode, normalisiereUrl, pruefeServer, SyncFehler, type ServerInfo } from '../sync/client.ts';
 
 function eigeneAdresse(): string {
   return /^https?:$/.test(window.location.protocol) ? window.location.origin : '';
@@ -29,73 +30,17 @@ function Fehlerkasten({ text }: { text: string }) {
   );
 }
 
-/** Eingabefeld für den Zugangscode mit Knopf zum Ein- und Ausblenden. */
-function CodeFeld({ id, wert, onChange }: { id: string; wert: string; onChange: (wert: string) => void }) {
-  const [sichtbar, setSichtbar] = useState(false);
-  return (
-    <div className="flex gap-2">
-      <input
-        id={id}
-        className="feld min-w-0 flex-1"
-        type={sichtbar ? 'text' : 'password'}
-        autoComplete="off"
-        autoCapitalize="none"
-        autoCorrect="off"
-        spellCheck={false}
-        value={wert}
-        onChange={(e) => onChange(e.target.value)}
-      />
-      <button type="button" className="knopf knopf-leise px-3 text-sm" aria-pressed={sichtbar} onClick={() => setSichtbar(!sichtbar)}>
-        {sichtbar ? 'Verbergen' : 'Anzeigen'}
-      </button>
-    </div>
-  );
-}
-
-/** Zeigt den Zugangscode groß und gut abtippbar, auf Wunsch mit Kopieren. */
-function CodeAnzeige({ code }: { code: string }) {
-  const [kopiert, setKopiert] = useState(false);
-  // Die Zwischenablage gibt es nur über https (oder localhost) – sonst bleibt das Markieren von Hand.
-  const kannKopieren = typeof navigator.clipboard?.writeText === 'function';
-
-  async function kopieren() {
-    try {
-      await navigator.clipboard.writeText(code);
-      setKopiert(true);
-      setTimeout(() => setKopiert(false), 2500);
-    } catch {
-      setKopiert(false);
-    }
-  }
-
-  return (
-    <div className="flex flex-col gap-2">
-      <output
-        className="border-rand bg-mulde block rounded-2xl border px-3 py-3 text-center font-mono text-lg font-semibold tracking-wide break-all select-all"
-        aria-label="Zugangscode"
-      >
-        {code}
-      </output>
-      {kannKopieren && (
-        <button type="button" className="knopf knopf-leise" onClick={() => void kopieren()}>
-          {kopiert ? '✓ Kopiert' : 'Code kopieren'}
-        </button>
-      )}
-    </div>
-  );
-}
-
 /** Verbundenes Gerät: Code für weitere Geräte anzeigen oder einen neuen erzeugen. */
-function Zugangscode() {
-  const [code, setCode] = useState<string | null>(null);
-  const [neu, setNeu] = useState(false);
+function Zugangscode({ frischFreigegeben }: { frischFreigegeben: string | null }) {
+  const [code, setCode] = useState<string | null>(frischFreigegeben);
+  const [hinweis, setHinweis] = useState<'freigegeben' | 'neu' | null>(frischFreigegeben ? 'freigegeben' : null);
   const [rueckfrage, setRueckfrage] = useState(false);
   const [laeuft, setLaeuft] = useState(false);
   const [fehler, setFehler] = useState<string | null>(null);
 
   async function anzeigen() {
     setFehler(null);
-    setNeu(false);
+    setHinweis(null);
     setCode(await gespeicherterCode());
   }
 
@@ -104,7 +49,7 @@ function Zugangscode() {
     setFehler(null);
     try {
       setCode(await neuerCode());
-      setNeu(true);
+      setHinweis('neu');
       setRueckfrage(false);
     } catch (e) {
       setFehler(meldung(e, 'Der neue Code konnte nicht erzeugt werden.'));
@@ -119,12 +64,19 @@ function Zugangscode() {
         <h3 id="zugangscode-titel" className="font-bold">
           Zugangscode
         </h3>
-        <p className="text-text2 text-sm">Mit diesem Code verbindest du weitere Geräte mit eurem Server.</p>
+        <p className="text-text2 text-sm">
+          Mit diesem Code treten weitere Geräte eurer Truhe bei – dort beim ersten Start „Einer Truhe beitreten“ wählen.
+        </p>
       </div>
 
       {code !== null && (
         <>
-          {neu && (
+          {hinweis === 'freigegeben' && (
+            <p className="border-akzent bg-akzent-weich rounded-2xl border p-3 text-sm" role="status">
+              <strong>✓ Die Truhe ist freigegeben.</strong> Gib diesen Code auf deinen anderen Geräten ein.
+            </p>
+          )}
+          {hinweis === 'neu' && (
             <p className="border-akzent bg-akzent-weich rounded-2xl border p-3 text-sm" role="status">
               <strong>Neuer Code erzeugt.</strong> Der bisherige gilt nicht mehr – trage den neuen jetzt auf deinen
               anderen Geräten ein (dort unter Einstellungen → Abgleich zwischen Geräten).
@@ -161,7 +113,7 @@ function Zugangscode() {
               className="knopf knopf-leise sm:flex-1"
               onClick={() => {
                 setCode(null);
-                setNeu(false);
+                setHinweis(null);
               }}
             >
               Code verbergen
@@ -224,38 +176,112 @@ function CodeErneutEingeben() {
   );
 }
 
-/** Verbindung zum Sync-Server einrichten, prüfen und trennen; Zugangscode anzeigen und erneuern. */
+/** Trennen mit Rückfrage – danach kennt dieses Gerät den Code nicht mehr. */
+function Trennen() {
+  const [code, setCode] = useState<string | null>(null);
+  const [offen, setOffen] = useState(false);
+
+  async function fragen() {
+    setCode(await gespeicherterCode());
+    setOffen(true);
+  }
+
+  if (!offen) {
+    return (
+      <button type="button" className="knopf knopf-gefahr sm:flex-1" onClick={() => void fragen()}>
+        Verbindung trennen
+      </button>
+    );
+  }
+  return (
+    <div className="border-bald-rand bg-bald-bg text-bald-text flex w-full flex-col gap-2 rounded-2xl border p-3" role="group" aria-label="Verbindung trennen">
+      <p className="text-sm font-medium">
+        Dieses Gerät vergisst dabei den Zugangscode. Notiere ihn, wenn du später wieder beitreten möchtest – die
+        Truhe bleibt auf dem Server, deine Daten bleiben auf diesem Gerät.
+      </p>
+      {code && <CodeAnzeige code={code} />}
+      <button type="button" className="knopf knopf-gefahr" onClick={() => void trenne()}>
+        Ja, trennen
+      </button>
+      <button type="button" className="knopf knopf-leise" onClick={() => setOffen(false)}>
+        Abbrechen
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Abgleich zwischen Geräten: die eigene Truhe freigeben (dabei entsteht der Code),
+ * einer vorhandenen beitreten, den Code anzeigen und erneuern, trennen.
+ */
 export function SyncEinstellungen() {
   const status = useSyncStatus();
-  const [url, setUrl] = useState(eigeneAdresse);
+  const [adresse, setAdresse] = useState(eigeneAdresse);
   const [code, setCode] = useState('');
   const [fehler, setFehler] = useState<string | null>(null);
-  const [verbindet, setVerbindet] = useState(false);
+  const [laeuft, setLaeuft] = useState<'freigeben' | 'beitreten' | null>(null);
+  const [frischFreigegeben, setFrischFreigegeben] = useState<string | null>(null);
+  // Liefert der Server, von dem die App kommt, auch den Abgleich? null = wird noch geprüft.
+  const [server, setServer] = useState<ServerInfo | null>(null);
 
-  async function verbinden() {
-    const adresse = normalisiereUrl(url);
-    if (!code.trim()) {
-      setFehler('Bitte gib den Zugangscode ein.');
-      return;
-    }
-    if (window.location.protocol === 'https:' && adresse.startsWith('http://')) {
+  const verbunden = status.zustand !== 'aus';
+  useEffect(() => {
+    if (verbunden) return;
+    let aktuell = true;
+    void pruefeServer('').then((info) => {
+      if (aktuell) setServer(info);
+    });
+    return () => {
+      aktuell = false;
+    };
+  }, [verbunden]);
+
+  /** Normalisierte Zieladresse; leer = der Server, von dem die App kommt. */
+  function ziel(): string | null {
+    const norm = normalisiereUrl(adresse);
+    if (window.location.protocol === 'https:' && norm.startsWith('http://')) {
       setFehler('Diese Seite läuft über https – der Server muss dann ebenfalls über https:// erreichbar sein.');
-      return;
+      return null;
     }
+    // Kommt die App vom Sync-Server selbst, bleibt die Adresse relativ – dann darf sich dessen Name ändern.
+    return norm === eigeneAdresse() ? '' : norm;
+  }
+
+  async function freigeben() {
+    const url = ziel();
+    if (url === null) return;
     setFehler(null);
-    setVerbindet(true);
+    setLaeuft('freigeben');
     try {
-      // Kommt die App vom Sync-Server selbst, bleibt die Adresse relativ – dann darf sich dessen Name ändern.
-      await verbinde({ url: adresse === eigeneAdresse() ? '' : adresse, token: code });
-      setCode('');
+      setFrischFreigegeben(await gebeFrei(url));
     } catch (e) {
-      setFehler(meldung(e, 'Die Verbindung ist fehlgeschlagen.'));
+      setFehler(meldung(e, 'Die Truhe konnte nicht freigegeben werden.'));
     } finally {
-      setVerbindet(false);
+      setLaeuft(null);
     }
   }
 
-  if (status.zustand !== 'aus' && !verbindet) {
+  async function beitreten() {
+    if (!code.trim()) {
+      setFehler('Bitte gib den Code der Truhe ein.');
+      return;
+    }
+    const url = ziel();
+    if (url === null) return;
+    setFehler(null);
+    setLaeuft('beitreten');
+    try {
+      await verbinde({ url, token: code });
+      setCode('');
+      setFrischFreigegeben(null);
+    } catch (e) {
+      setFehler(meldung(e, 'Der Beitritt ist fehlgeschlagen.'));
+    } finally {
+      setLaeuft(null);
+    }
+  }
+
+  if (verbunden && !laeuft) {
     const codeUngueltig = status.fehlerArt === 'token';
     return (
       <div className="flex flex-col gap-3">
@@ -274,7 +300,7 @@ export function SyncEinstellungen() {
           </p>
         )}
 
-        <div className="flex flex-col gap-2 sm:flex-row">
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
           <button
             type="button"
             className="knopf knopf-leise sm:flex-1"
@@ -283,68 +309,95 @@ export function SyncEinstellungen() {
           >
             Jetzt abgleichen
           </button>
-          <button type="button" className="knopf knopf-gefahr sm:flex-1" onClick={() => void trenne()}>
-            Verbindung trennen
-          </button>
+          <Trennen />
         </div>
-        <p className="text-text2 text-sm">Beim Trennen bleiben alle Daten auf diesem Gerät erhalten.</p>
 
-        {!codeUngueltig && <Zugangscode />}
+        {!codeUngueltig && <Zugangscode key={frischFreigegeben ?? 'bestehend'} frischFreigegeben={frischFreigegeben} />}
       </div>
     );
   }
 
+  // Auf dem eigenen Server freigeben geht nur, wenn dort der Abgleich läuft und er neue Truhen annimmt.
+  // Bei einer anderen Adresse zeigt sich das erst beim Versuch.
+  const eigenerServer = normalisiereUrl(adresse) === eigeneAdresse();
+  const kannFreigeben = !eigenerServer || (server?.da === true && server.neueTruhen);
+
   return (
-    <form
-      className="flex flex-col gap-3"
-      onSubmit={(e) => {
-        e.preventDefault();
-        void verbinden();
-      }}
-    >
-      <div>
-        <label className="beschriftung" htmlFor="sync-url">
-          Adresse des Servers
+    <div className="flex flex-col gap-4">
+      {eigenerServer && server && !server.da && (
+        <p className="text-text2 text-sm">
+          Unter dieser Adresse läuft kein Abgleich-Server. Hast du einen eigenen, trage unten seine Adresse ein.
+        </p>
+      )}
+      {eigenerServer && server?.da && !server.neueTruhen && (
+        <p className="text-text2 text-sm">
+          Auf diesem Server lassen sich keine neuen Truhen anlegen. Einer vorhandenen kannst du mit ihrem Code beitreten.
+        </p>
+      )}
+
+      {kannFreigeben && (
+        <section className="flex flex-col gap-2" aria-labelledby="freigeben-titel">
+          <h3 id="freigeben-titel" className="font-bold">
+            Diese Truhe für weitere Geräte freigeben
+          </h3>
+          <p className="text-text2 text-sm">
+            Legt die Truhe dieses Geräts auf dem Server ab. Du bekommst einen Code, mit dem andere Geräte beitreten.
+          </p>
+          <button type="button" className="knopf knopf-primaer" disabled={laeuft !== null} onClick={() => void freigeben()}>
+            {laeuft === 'freigeben' ? 'Gebe frei …' : 'Truhe freigeben'}
+          </button>
+        </section>
+      )}
+
+      <form
+        className={`flex flex-col gap-2 ${kannFreigeben ? 'border-rand border-t pt-4' : ''}`}
+        aria-labelledby="beitreten-titel"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void beitreten();
+        }}
+      >
+        <h3 id="beitreten-titel" className="font-bold">
+          Einer vorhandenen Truhe beitreten
+        </h3>
+        <p className="text-text2 text-sm">
+          Mit dem Code, den das erste Gerät bekommen hat. Was auf diesem Gerät schon eingetragen ist, kommt zur Truhe
+          dazu.
+        </p>
+        <label className="beschriftung mb-0" htmlFor="sync-token">
+          Code der Truhe
         </label>
-        <input
-          id="sync-url"
-          className="feld"
-          type="url"
-          inputMode="url"
-          autoCapitalize="none"
-          autoCorrect="off"
-          spellCheck={false}
-          placeholder="https://truhe.example.de"
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-        />
-      </div>
-      <div>
-        <label className="beschriftung" htmlFor="sync-token">
-          Zugangscode
-        </label>
-        <CodeFeld id="sync-token" wert={code} onChange={setCode} />
-        <details className="text-text2 mt-1.5 text-sm">
-          <summary className="text-akzent inline-flex min-h-11 cursor-pointer items-center font-semibold">
-            Woher bekomme ich den Code?
-          </summary>
-          <ul className="flex list-disc flex-col gap-1.5 pl-5">
-            <li>
-              <strong className="text-text">Schon ein Gerät verbunden?</strong> Dort unter Einstellungen → Abgleich
-              zwischen Geräten auf „Code anzeigen“ tippen.
-            </li>
-            <li>
-              <strong className="text-text">Erstes Gerät?</strong> Den Code nennt die Installation des Servers am Ende.
-              Er steht dort auch in der Datei <code className="whitespace-nowrap">/etc/truhenblick/server.env</code> (bei Docker:{' '}
-              <code>SYNC_TOKEN</code> in der <code>.env</code>).
-            </li>
-          </ul>
-        </details>
-      </div>
+        <CodeFeld id="sync-token" wert={code} onChange={setCode} platzhalter="xxxx-xxxx-xxxx-xxxx-xxxx" />
+        <button type="submit" className="knopf knopf-leise" disabled={laeuft !== null}>
+          {laeuft === 'beitreten' ? 'Trete bei …' : 'Beitreten'}
+        </button>
+      </form>
+
       {fehler && <Fehlerkasten text={fehler} />}
-      <button type="submit" className="knopf knopf-primaer" disabled={verbindet}>
-        {verbindet ? 'Verbinde …' : 'Verbinden'}
-      </button>
-    </form>
+
+      <details className="border-rand rounded-2xl border" open={server !== null && !server.da}>
+        <summary className="flex min-h-12 cursor-pointer list-none items-center px-4 py-2 text-sm font-semibold [&::-webkit-details-marker]:hidden">
+          Adresse des Servers
+        </summary>
+        <div className="border-rand border-t p-4">
+          <input
+            id="sync-url"
+            className="feld"
+            type="url"
+            inputMode="url"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            placeholder="https://truhe.example.de"
+            aria-label="Adresse des Servers"
+            value={adresse}
+            onChange={(e) => setAdresse(e.target.value)}
+          />
+          <p className="text-text2 mt-1.5 text-sm">
+            Nur ändern, wenn der Abgleich über einen anderen Server läuft als den, von dem diese App geladen wurde.
+          </p>
+        </div>
+      </details>
+    </div>
   );
 }

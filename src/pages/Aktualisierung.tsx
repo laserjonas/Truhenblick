@@ -186,7 +186,14 @@ export function Aktualisierung() {
           </p>
         )}
 
-        {server && !server.moeglich && (
+        {server && !server.moeglich && server.grund === 'andere-truhe' && (
+          <p className="text-text2 text-sm">
+            Den Server aktualisieren können nur die Geräte der Truhe, die dort zuerst angelegt wurde. Neue Versionen
+            der App lädst du trotzdem über „Nach Updates suchen“.
+          </p>
+        )}
+
+        {server && !server.moeglich && server.grund !== 'andere-truhe' && (
           <div className="text-text2 text-sm">
             <p>
               Dieser Server wird nicht aus der App aktualisiert – das ist zum Beispiel bei Docker so. Aktualisiere ihn

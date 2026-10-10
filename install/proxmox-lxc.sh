@@ -95,7 +95,8 @@ Truhenblick
   --port PORT              Port der Web-App                  (TB_PORT, Standard: 80)
   --with-sync              mit Sync-Backend                  (TB_SYNC=1, Standard)
   --no-sync                ohne Sync-Backend                 (TB_SYNC=0)
-  --sync-token CODE        Zugangscode (min. 16 Zeichen)     (TB_SYNC_TOKEN, Standard: wird erzeugt)
+  --sync-token CODE        freiwillig: Code der ersten Truhe (TB_SYNC_TOKEN, min. 16 Zeichen;
+                           sonst entsteht der Code beim Anlegen der Truhe in der App)
   --repo URL               Git-Adresse der Quellen           (TB_REPO)
   --branch NAME            Zweig                             (TB_BRANCH, Standard: main)
 
@@ -488,7 +489,7 @@ if [[ "$OHNE_RUECKFRAGE" != "1" ]]; then
     UNPRIVILEGIERT=0
   fi
 
-  if frage_janein "Sync-Backend mitinstallieren? Damit sehen mehrere Geräte denselben Stand." "$([[ "$MIT_SYNC" == 1 ]] && echo j || echo n)"; then
+  if frage_janein "Abgleich zwischen Geräten mitinstallieren? Dann können weitere Geräte einer Truhe per Code beitreten." "$([[ "$MIT_SYNC" == 1 ]] && echo j || echo n)"; then
     MIT_SYNC=1
   else
     MIT_SYNC=0
@@ -538,9 +539,8 @@ if [[ -n "$SSH_KEY" ]]; then
   fi
 fi
 
-if [[ "$MIT_SYNC" == 1 && -z "$SYNC_TOKEN" ]]; then
-  SYNC_TOKEN="$(openssl rand -hex 24 2>/dev/null || head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')"
-fi
+# Ein Zugangscode wird hier nicht erzeugt: Er entsteht, wenn in der App eine Truhe angelegt wird.
+# --sync-token legt freiwillig den Code der ersten Truhe fest.
 
 # ------------------------------------------------------------------ Zusammenfassung
 
@@ -734,12 +734,15 @@ if [[ "$MIT_SYNC" == 1 ]]; then
   cat <<EOF
 
   ${FETT}Abgleich zwischen Geräten${AUS}
-  Zugangscode:    ${FETT}${SYNC_TOKEN}${AUS}
-  In der App unter Einstellungen → „Abgleich zwischen Geräten“ eintragen.
-  Dort lässt er sich später auch anzeigen und neu erzeugen. Dieser Anfangscode
-  steht außerdem im Container in /etc/truhenblick/server.env.
+  So geht es:     1. Adresse oben öffnen und „Truhe anlegen“ – dabei zeigt die App einen Code.
+                  2. Auf jedem weiteren Gerät „Einer Truhe beitreten“ wählen und den Code eingeben.
   Datenbank:      /var/lib/truhenblick/truhenblick.sqlite (im Container)
 EOF
+  if [[ -n "$SYNC_TOKEN" ]]; then
+    cat <<EOF
+  Erste Truhe:    Ihr Code ist der übergebene (--sync-token): ${FETT}${SYNC_TOKEN}${AUS}
+EOF
+  fi
 fi
 
 cat <<EOF

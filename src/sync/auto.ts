@@ -4,7 +4,9 @@ import {
   entferneKonfig,
   erneuereCode,
   ladeKonfig,
+  legeTruheAn,
   letzterErfolg,
+  merkeCodeHinweis,
   normalisiereUrl,
   speichereKonfig,
   SyncFehler,
@@ -128,6 +130,33 @@ export async function verbinde(eingabe: SyncKonfig): Promise<void> {
     setze(vorher ? { zustand: 'bereit', url: vorher.url } : { zustand: 'aus', url: '' });
     throw fehler;
   }
+}
+
+/**
+ * Gibt die Truhe dieses Geräts für weitere Geräte frei: legt auf dem Server eine neue Truhe an,
+ * lädt den lokalen Stand hinein und liefert den Zugangscode, mit dem andere beitreten.
+ * Mit `hinweis` zeigt die Startseite den Code danach einmal groß an.
+ */
+export async function gebeFrei(url: string, hinweis = false): Promise<string> {
+  const adresse = normalisiereUrl(url);
+  const code = await legeTruheAn(adresse);
+  await verbinde({ url: adresse, token: code });
+  if (hinweis) await merkeCodeHinweis(true);
+  return code;
+}
+
+/**
+ * Für den Startassistenten: legt auf dem Server eine neue Truhe an und verbindet dieses Gerät damit.
+ * Der Aufbau der Truhe entsteht erst danach lokal und geht mit dem nächsten Abgleich hinauf.
+ * Die Startseite zeigt den Code anschließend einmal groß an.
+ */
+export async function legeAnUndVerbinde(url: string): Promise<string> {
+  const adresse = normalisiereUrl(url);
+  const code = await legeTruheAn(adresse);
+  await speichereKonfig({ url: adresse, token: code });
+  await merkeCodeHinweis(true);
+  setze({ zustand: 'bereit', url: adresse, fehler: null, fehlerArt: null });
+  return code;
 }
 
 export async function trenne(): Promise<void> {

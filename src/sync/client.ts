@@ -39,6 +39,14 @@ export async function letzterErfolg(): Promise<string | null> {
   return (await metaLesen<string>(LETZTER_ERFOLG)) ?? null;
 }
 
+/** Schlüssel des Merkers „frisch angelegte Truhe: Code einmal groß zeigen“ (siehe NeueTruheHinweis). */
+export const CODE_HINWEIS = 'sync.codeHinweis';
+
+export async function merkeCodeHinweis(an: boolean): Promise<void> {
+  if (an) await metaSchreiben(CODE_HINWEIS, true);
+  else await db.meta.delete(CODE_HINWEIS);
+}
+
 /**
  * Speichert die Verbindung. Der bekannte Serverstand wird verworfen und alles
  * Lokale vorgemerkt: Der nächste Abgleich holt alles und lädt alles hoch – so
@@ -55,7 +63,7 @@ export async function speichereKonfig(konfig: SyncKonfig): Promise<void> {
 /** Trennt die Verbindung. Die lokalen Daten bleiben erhalten und werden für eine spätere Verbindung vorgemerkt. */
 export async function entferneKonfig(): Promise<void> {
   await db.transaction('rw', db.meta, db.bereiche, db.artikel, async () => {
-    await db.meta.bulkDelete([KONFIG, REV, SERVER_ID, LETZTER_ERFOLG]);
+    await db.meta.bulkDelete([KONFIG, REV, SERVER_ID, LETZTER_ERFOLG, CODE_HINWEIS]);
     await allesVormerken();
   });
 }
@@ -79,7 +87,8 @@ async function rufe(konfig: SyncKonfig, pfad: string, koerper?: unknown, bei404?
     antwort = await fetch(`${konfig.url}${pfad}`, {
       method: koerper === undefined ? 'GET' : 'POST',
       headers: {
-        Authorization: `Bearer ${konfig.token}`,
+        // Ohne Code (Truhe anlegen, Server prüfen) wird keine Anmeldung mitgeschickt.
+        ...(konfig.token ? { Authorization: `Bearer ${konfig.token}` } : {}),
         ...(koerper === undefined ? {} : { 'Content-Type': 'application/json' }),
       },
       body: koerper === undefined ? undefined : JSON.stringify(koerper),
@@ -90,12 +99,17 @@ async function rufe(konfig: SyncKonfig, pfad: string, koerper?: unknown, bei404?
     throw new SyncFehler('netz', 'Der Server ist nicht erreichbar.');
   }
   if (antwort.status === 401) throw new SyncFehler('token', 'Der Zugangscode stimmt nicht.');
-  if (antwort.status === 429) throw new SyncFehler('gesperrt', 'Zu viele Fehlversuche – bitte in einigen Minuten erneut versuchen.');
+  if (antwort.status === 429) {
+    throw new SyncFehler('gesperrt', (await serverMeldung(antwort)) ?? 'Zu viele Versuche – bitte in einigen Minuten erneut versuchen.');
+  }
   if (antwort.status === 404 && bei404) throw new SyncFehler('server', bei404);
   if ([404, 502, 503, 504].includes(antwort.status)) {
     throw new SyncFehler('server', 'Unter dieser Adresse ist kein Truhenblick-Sync-Backend erreichbar.');
   }
-  if (!antwort.ok) throw new SyncFehler('server', `Der Server meldet einen Fehler (${antwort.status}).`);
+  if (!antwort.ok) {
+    // Der Server begründet Absagen (z. B. „Höchstzahl an Truhen erreicht“) selbst.
+    throw new SyncFehler('server', (await serverMeldung(antwort)) ?? `Der Server meldet einen Fehler (${antwort.status}).`);
+  }
 
   try {
     const daten: unknown = await antwort.json();
@@ -104,6 +118,54 @@ async function rufe(konfig: SyncKonfig, pfad: string, koerper?: unknown, bei404?
     // unten gemeldet
   }
   throw new SyncFehler('server', KEIN_SERVER);
+}
+
+/** Liest die Begründung aus einer Absage des Servers ({ fehler: "…" }). */
+async function serverMeldung(antwort: Response): Promise<string | null> {
+  try {
+    const daten = (await antwort.json()) as { fehler?: unknown };
+    return typeof daten.fehler === 'string' && daten.fehler ? daten.fehler : null;
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------- Truhen anlegen
+
+export interface ServerInfo {
+  /** Unter der Adresse antwortet ein Truhenblick-Server */
+  da: boolean;
+  /** Er nimmt neue Truhen an */
+  neueTruhen: boolean;
+}
+
+/**
+ * Gibt es unter der Adresse einen Truhenblick-Server – und lässt sich dort eine Truhe anlegen?
+ * Leere Adresse = der Server, von dem die App geladen wurde. Wirft nie.
+ */
+export async function pruefeServer(url: string): Promise<ServerInfo> {
+  try {
+    const antwort = await fetch(`${url}/api/health`, { cache: 'no-store', signal: AbortSignal.timeout(5000) });
+    if (!antwort.ok) return { da: false, neueTruhen: false };
+    const daten = (await antwort.json()) as { app?: unknown; neueTruhen?: unknown };
+    if (daten.app !== 'truhenblick') return { da: false, neueTruhen: false };
+    // Ältere Server kennen die Angabe nicht – und können auch keine Truhen anlegen.
+    return { da: true, neueTruhen: daten.neueTruhen === true };
+  } catch {
+    return { da: false, neueTruhen: false };
+  }
+}
+
+/** Legt auf dem Server eine neue, leere Truhe an und liefert ihren Zugangscode. */
+export async function legeTruheAn(url: string): Promise<string> {
+  const daten = await rufe(
+    { url, token: '' },
+    '/api/truhen',
+    {},
+    'Dieser Server kann noch keine Truhen anlegen. Bitte zuerst den Server aktualisieren (truhenblick-update).',
+  );
+  if (typeof daten.code !== 'string' || daten.code.length < 16) throw new SyncFehler('server', KEIN_SERVER);
+  return daten.code;
 }
 
 /** Schickt eine Sync-Anfrage an den Server. */
@@ -179,6 +241,7 @@ export function leseUpdateStand(daten: Record<string, unknown>): UpdateStand {
   const l = daten.letztes as { zustand?: unknown; beendet?: unknown; meldung?: unknown } | null | undefined;
   return {
     moeglich: daten.moeglich,
+    grund: daten.grund === 'andere-truhe' || daten.grund === 'nicht-eingerichtet' ? daten.grund : null,
     installiert: text(daten.installiert),
     verfuegbar: text(daten.verfuegbar),
     neu: typeof daten.neu === 'boolean' ? daten.neu : null,

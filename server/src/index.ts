@@ -33,6 +33,8 @@ function start(): void {
   const app = erstelleApp({
     speicher,
     token: konfig.token,
+    neueTruhen: konfig.neueTruhen,
+    maxTruhen: konfig.maxTruhen,
     corsOrigins: konfig.corsOrigins,
     version: version(),
     update: erstelleUpdateDienst(STANDARD_ORTE(konfig.datenVerzeichnis)),
@@ -41,7 +43,8 @@ function start(): void {
   const server = serve({ fetch: app.fetch, port: konfig.port, hostname: konfig.host }, (info) => {
     const stand = speicher.stand();
     console.log(`Truhenblick-Server ${version()} lauscht auf ${info.address}:${info.port}`);
-    console.log(`Datenbank: ${datei} (${stand.datensaetze} Datensätze, Stand ${stand.rev})`);
+    console.log(`Datenbank: ${datei} (${stand.truhen} Truhen, ${stand.datensaetze} Datensätze)`);
+    console.log(`Neue Truhen anlegen: ${konfig.neueTruhen ? `an (höchstens ${konfig.maxTruhen})` : 'aus'}`);
   });
 
   let beendet = false;

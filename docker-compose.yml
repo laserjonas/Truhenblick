@@ -32,6 +32,8 @@ services:
     image: truhenblick-api
     restart: unless-stopped
     environment:
+      NEUE_TRUHEN: ${NEUE_TRUHEN:-an}
+      MAX_TRUHEN: ${MAX_TRUHEN:-10}
       SYNC_TOKEN: ${SYNC_TOKEN:-}
       CORS_ORIGIN: ${CORS_ORIGIN:-}
     volumes:

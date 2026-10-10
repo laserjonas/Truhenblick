@@ -3,7 +3,6 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, w
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
-import type { Hono } from 'hono';
 import type { UpdateStand } from '../../shared/types.ts';
 import { erstelleApp } from '../src/app.ts';
 import { oeffneSpeicher, type Speicher } from '../src/speicher.ts';
@@ -172,7 +171,7 @@ describe('Update-Dienst', () => {
 
 describe('Schnittstelle /api/update', () => {
   let speicher: Speicher;
-  let app: Hono;
+  let app: ReturnType<typeof erstelleApp>;
   const mit = (token: string | null) => (token ? { Authorization: `Bearer ${token}` } : undefined);
 
   beforeEach(() => {
@@ -207,6 +206,22 @@ describe('Schnittstelle /api/update', () => {
   it('sagt klar, wenn der Server nicht aus der App aktualisiert werden kann', async () => {
     const stand = (await (await app.request('/api/update', { headers: mit(TOKEN) })).json()) as UpdateStand;
     assert.equal(stand.moeglich, false);
+    assert.equal(stand.grund, 'nicht-eingerichtet');
     assert.equal((await app.request('/api/update', { method: 'POST', headers: mit(TOKEN) })).status, 409);
+  });
+
+  it('lässt nur die zuerst angelegte Truhe den Server aktualisieren', async () => {
+    richteEin();
+    const { code } = (await (await app.request('/api/truhen', { method: 'POST' })).json()) as { code: string };
+
+    const stand = (await (await app.request('/api/update?pruefen=1', { headers: mit(code) })).json()) as UpdateStand;
+    assert.equal(stand.moeglich, false);
+    assert.equal(stand.grund, 'andere-truhe');
+    assert.equal(abfragen, 0);
+
+    assert.equal((await app.request('/api/update', { method: 'POST', headers: mit(code) })).status, 403);
+    assert.equal(existsSync(orte.anfrageDatei), false);
+    // Die erste Truhe darf weiterhin.
+    assert.equal((await app.request('/api/update', { method: 'POST', headers: mit(TOKEN) })).status, 202);
   });
 });

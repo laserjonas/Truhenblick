@@ -224,6 +224,13 @@ abgewiesen "ID einer VM" 'bereits vergeben' --ctid 101
 abgewiesen "zu kleine ID" 'Ungültige Container-ID' --ctid 42
 abgewiesen "falsche IP" 'Ungültige IP-Angabe' --ip 192.168.1.50
 abgewiesen "statisch ohne Gateway" 'Gateway benötigt' --ip 192.168.1.50/24
+abgewiesen "Oktett über 255" 'Ungültige IP-Angabe' --ip 192.168.1.300/24
+abgewiesen "Gateway außerhalb des Netzes (Tippfehler 172 statt 192)" \
+  'Gateway 192\.168\.178\.1 liegt nicht im Netz der IP-Adresse 172\.168\.178\.220/24 \(172\.168\.178\.0/24\)' \
+  --ip 172.168.178.220/24 --gateway 192.168.178.1
+abgewiesen "Gateway gleich der eigenen Adresse" 'liegt nicht im Netz' --ip 192.168.1.5/24 --gateway 192.168.1.5
+abgewiesen "Gateway knapp außerhalb (/25)" 'liegt nicht im Netz der IP-Adresse 192\.168\.1\.10/25 \(192\.168\.1\.0/25\)' \
+  --ip 192.168.1.10/25 --gateway 192.168.1.129
 abgewiesen "unbekannter Storage" 'kann keine Container-Disks aufnehmen' --storage gibtsnicht
 abgewiesen "inaktiver Storage" 'kann keine Container-Disks aufnehmen' --storage kaputt
 abgewiesen "unbekannte Bridge" 'Bridge „vmbr9“ gibt es' --bridge vmbr9
@@ -235,6 +242,11 @@ abgewiesen "kaputter SSH-Schlüssel" 'weder eine vorhandene Datei noch ein gült
 abgewiesen "zu wenig RAM" 'Ungültiger Arbeitsspeicher' --memory 64
 abgewiesen "unbekannte Option" 'Unbekannte Option: --quatsch' --quatsch
 abgewiesen "Option ohne Wert" 'braucht einen Wert' --hostname
+
+test_titel "Geroutete Einzeladresse (/32): Gateway darf außerhalb liegen"
+starte -- --yes --ip 203.0.113.7/32 --gateway 198.51.100.1
+pruefe "endet erfolgreich" code_ist 0
+pruefe "Adresse und Gateway werden übernommen" aufruf '^pct create .*ip=203\.0\.113\.7/32,gw=198\.51\.100\.1 '
 
 test_titel "Falsche Umgebung"
 starte MOCK_UID=1000 -- --yes
@@ -269,6 +281,8 @@ pruefe "Protokoll wird genannt" ausgabe 'Ausführliches Protokoll: /tmp/truhenbl
 pruefe "letzte Meldungen werden gezeigt" ausgabe 'npm ERR! build failed'
 starte MOCK_FEHLER=keine-ip -- --yes
 pruefe "ohne IP: Hinweis auf Bridge/DHCP" ausgabe 'keine IP-Adresse erhalten'
+starte MOCK_FEHLER=kein-internet -- --yes --ip 192.168.1.50/24 --gateway 192.168.1.1
+pruefe "kein Internet bei statischer IP: Meldung nennt die Angaben" ausgabe 'Eingestellt sind IP 192\.168\.1\.50/24 und Gateway 192\.168\.1\.1'
 
 test_titel "Rückfragen im Textmodus"
 # Hostname (erst ungültig), ID (erst belegt), Storage, Disk, Kerne, RAM, Bridge, DHCP? nein → IP, Gateway,
@@ -286,6 +300,14 @@ pruefe "Passwort aus der Rückfrage" grep -qx 'root:geheim123' "$MOCK_ABLAGE/chp
 pruefe "ohne Sync, Port 8443" uebergabe '^TB_PORT=8443$'
 pruefe "ohne Sync" uebergabe '^TB_SYNC=0$'
 pruefe "Zusammenfassung vor dem Anlegen" ausgabe 'Container jetzt anlegen'
+
+# Tippfehler in der IP: Gateway passt nicht → beide Angaben werden erneut erfragt
+EINGABEN='\n\n\n\n\n\n\nn\n172.168.178.220/24\n192.168.178.1\n192.168.178.220/24\n\n\n\n\n\n\n\nj\n'
+starte --
+pruefe "Gateway außerhalb: endet nach der Korrektur erfolgreich" code_ist 0
+pruefe "Gateway außerhalb: Hinweis nennt das Netz" ausgabe 'liegt nicht im Netz der IP-Adresse 172\.168\.178\.220/24 \(172\.168\.178\.0/24\)'
+pruefe "Gateway außerhalb: korrigierte Adresse wird verwendet" aufruf '^pct create .*ip=192\.168\.178\.220/24,gw=192\.168\.178\.1 '
+pruefe "Gateway außerhalb: falsche Adresse wird nie verwendet" kein_aufruf '172\.168\.178\.220'
 
 EINGABEN='\n\n\n\n\n\n\n\n\n\n\n\n\n\nn\n'
 starte --

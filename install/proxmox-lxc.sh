@@ -242,8 +242,41 @@ info "$(pveversion | head -n1)"
 # ------------------------------------------------------------------ Hilfen für Prüfungen
 
 ist_zahl()   { [[ "$1" =~ ^[0-9]+$ ]]; }
-ist_ipv4()   { [[ "$1" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; }
-ist_cidr()   { [[ "$1" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}/([0-9]|[12][0-9]|3[0-2])$ ]]; }
+# Wandelt eine IPv4-Adresse in eine Zahl um; schlägt fehl, wenn es keine gültige Adresse ist.
+ip_zahl() {
+  [[ "$1" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]] || return 1
+  local a=$((10#${BASH_REMATCH[1]})) b=$((10#${BASH_REMATCH[2]})) c=$((10#${BASH_REMATCH[3]})) d=$((10#${BASH_REMATCH[4]}))
+  (( a <= 255 && b <= 255 && c <= 255 && d <= 255 )) || return 1
+  printf '%s' $(( (a << 24) | (b << 16) | (c << 8) | d ))
+}
+
+zahl_ip() { printf '%s.%s.%s.%s' $(( ($1 >> 24) & 255 )) $(( ($1 >> 16) & 255 )) $(( ($1 >> 8) & 255 )) $(( $1 & 255 )); }
+
+ist_ipv4() { ip_zahl "$1" >/dev/null; }
+ist_cidr() { [[ "$1" =~ ^[0-9.]+/([0-9]|[12][0-9]|3[0-2])$ ]] && ip_zahl "${1%/*}" >/dev/null; }
+
+netzmaske() { printf '%s' $(( $1 == 0 ? 0 : (0xFFFFFFFF << (32 - $1)) & 0xFFFFFFFF )); }
+
+# netz_von ADRESSE/CIDR → Netz in der Schreibweise 192.168.1.0/24
+netz_von() {
+  local bits="${1#*/}" a
+  a="$(ip_zahl "${1%/*}")" || return 1
+  printf '%s/%s' "$(zahl_ip $(( a & $(netzmaske "$bits") )))" "$bits"
+}
+
+# gateway_passt ADRESSE/CIDR GATEWAY – liegt das Gateway im selben Netz wie die Adresse?
+# Ein häufiger Tippfehler (172.… statt 192.…) fällt so vor dem Anlegen auf und nicht erst,
+# wenn der Container kein Internet hat. Bei /31 und /32 liegt das Gateway üblicherweise
+# außerhalb (geroutete Adressen bei Hostern) – dort wird nicht geprüft.
+gateway_passt() {
+  local bits="${1#*/}" a g maske
+  a="$(ip_zahl "${1%/*}")" || return 1
+  g="$(ip_zahl "$2")" || return 1
+  (( a != g )) || return 1
+  (( bits >= 31 )) && return 0
+  maske="$(netzmaske "$bits")"
+  (( (a & maske) == (g & maske) ))
+}
 ist_ssh_key() { [[ "$1" =~ ^(ssh-(rsa|ed25519|dss)|ecdsa-sha2-[a-z0-9-]+|sk-[a-z0-9@.-]+)[[:space:]]+[A-Za-z0-9+/=]+ ]]; }
 
 storages_fuer() {
@@ -421,8 +454,12 @@ if [[ "$OHNE_RUECKFRAGE" != "1" ]]; then
     GATEWAY=""
   else
     [[ "$IP" == dhcp ]] && IP=""
-    frage_bis IP "Statische IP-Adresse mit Netzmaske (z. B. 192.168.1.50/24)" "Bitte im Format 192.168.1.50/24 eingeben." ist_cidr
-    frage_bis GATEWAY "Gateway (z. B. 192.168.1.1)" "Bitte eine IPv4-Adresse eingeben." ist_ipv4
+    while true; do
+      frage_bis IP "Statische IP-Adresse mit Netzmaske (z. B. 192.168.1.50/24)" "Bitte im Format 192.168.1.50/24 eingeben." ist_cidr
+      frage_bis GATEWAY "Gateway (z. B. 192.168.1.1)" "Bitte eine IPv4-Adresse eingeben." ist_ipv4
+      gateway_passt "$IP" "$GATEWAY" && break
+      hinweis "Das Gateway $GATEWAY liegt nicht im Netz der IP-Adresse $IP ($(netz_von "$IP")). Bitte beide Angaben prüfen."
+    done
   fi
   frage_bis VLAN "VLAN-Tag (leer = keines)" "Bitte eine Zahl von 1 bis 4094 eingeben oder leer lassen." pruefe_vlan
 
@@ -469,6 +506,8 @@ pruefe_bridge "$BRIDGE" || abbruch "Die Bridge „$BRIDGE“ gibt es auf diesem 
 pruefe_ip "$IP" || abbruch "Ungültige IP-Angabe: $IP (erwartet: dhcp oder z. B. 192.168.1.50/24)"
 if [[ "$IP" != dhcp ]]; then
   ist_ipv4 "$GATEWAY" || abbruch "Bei statischer IP wird ein Gateway benötigt (--gateway 192.168.1.1)."
+  gateway_passt "$IP" "$GATEWAY" ||
+    abbruch "Das Gateway $GATEWAY liegt nicht im Netz der IP-Adresse $IP ($(netz_von "$IP")). Bitte beide Angaben prüfen – ein Tippfehler?"
 fi
 pruefe_vlan "$VLAN" || abbruch "Ungültiger VLAN-Tag: $VLAN (1 bis 4094)"
 [[ -z "$DNS" ]] || ist_ipv4 "$DNS" || abbruch "Ungültiger DNS-Server: $DNS"
@@ -611,7 +650,12 @@ for _ in $(seq 1 15); do
   fi
   sleep 2
 done
-[[ "$INTERNET" == 1 ]] || abbruch "Der Container erreicht das Internet nicht (Namensauflösung schlägt fehl). Bitte Gateway und DNS prüfen."
+if [[ "$INTERNET" != 1 ]]; then
+  if [[ "$IP" == dhcp ]]; then
+    abbruch "Der Container erreicht das Internet nicht (Namensauflösung schlägt fehl). Bitte Bridge, VLAN und DNS prüfen."
+  fi
+  abbruch "Der Container erreicht das Internet nicht (Namensauflösung schlägt fehl). Eingestellt sind IP $IP und Gateway $GATEWAY${DNS:+, DNS $DNS} – stimmen diese Angaben?"
+fi
 ok "Internetzugang vorhanden"
 
 if [[ -n "$PASSWORT" ]]; then

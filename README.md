@@ -216,8 +216,9 @@ IP-Adresse und Token sind Beispiele. Auf einem Testsystem dauerte der ganze Lauf
 
 </details>
 
-**Arbeitsspeicher:** 512 MB reichen für den Betrieb locker (App und Backend brauchen zusammen rund 130 MB).
-Beim Bauen der App wird das Limit aber ausgeschöpft und etwas Swap benutzt – den Swap deshalb nicht auf 0 setzen.
+**Arbeitsspeicher:** 512 MB reichen für den Betrieb locker – im Test belegte der Container mit App und Backend
+rund 60 MB. Beim Bauen der App wird das Limit aber ausgeschöpft und etwas Swap benutzt (gemessen: bis zu 70 MB) –
+den Swap deshalb nicht auf 0 setzen.
 
 **Statische IP:** Das Skript prüft vor dem Anlegen, ob das Gateway im Netz der Adresse liegt. Ein Tippfehler wie
 `172.168.178.50/24` mit Gateway `192.168.178.1` fällt so sofort auf und nicht erst, wenn der Container kein Internet

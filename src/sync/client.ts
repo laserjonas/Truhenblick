@@ -63,7 +63,7 @@ export async function speichereKonfig(konfig: SyncKonfig): Promise<void> {
 /** Trennt die Verbindung. Die lokalen Daten bleiben erhalten und werden für eine spätere Verbindung vorgemerkt. */
 export async function entferneKonfig(): Promise<void> {
   await db.transaction('rw', db.meta, db.bereiche, db.artikel, async () => {
-    await db.meta.bulkDelete([KONFIG, REV, SERVER_ID, LETZTER_ERFOLG, CODE_HINWEIS]);
+    await db.meta.bulkDelete([KONFIG, REV, SERVER_ID, LETZTER_ERFOLG, CODE_HINWEIS, LESE_SCHLUESSEL]);
     await allesVormerken();
   });
 }
@@ -81,11 +81,17 @@ const KEIN_SERVER = 'Unter dieser Adresse antwortet kein Truhenblick-Server.';
  * Anfrage an das Backend; übersetzt Fehler in verständliche Meldungen.
  * Mit `koerper` wird per POST gesendet, sonst per GET. `bei404` ersetzt die Meldung für „unbekannt“.
  */
-async function rufe(konfig: SyncKonfig, pfad: string, koerper?: unknown, bei404?: string): Promise<Record<string, unknown>> {
+async function rufe(
+  konfig: SyncKonfig,
+  pfad: string,
+  koerper?: unknown,
+  bei404?: string,
+  methode?: 'DELETE',
+): Promise<Record<string, unknown>> {
   let antwort: Response;
   try {
     antwort = await fetch(`${konfig.url}${pfad}`, {
-      method: koerper === undefined ? 'GET' : 'POST',
+      method: methode ?? (koerper === undefined ? 'GET' : 'POST'),
       headers: {
         // Ohne Code (Truhe anlegen, Server prüfen) wird keine Anmeldung mitgeschickt.
         ...(konfig.token ? { Authorization: `Bearer ${konfig.token}` } : {}),
@@ -227,6 +233,47 @@ export async function wechsleCode(code: string, sende: Sende = sendeAnfrage): Pr
     if (fehler instanceof SyncFehler && fehler.art === 'token') await metaSchreiben(KONFIG, konfig);
     throw fehler;
   }
+}
+
+// ---------------------------------------------------------------- Lese-Schlüssel (Home Assistant)
+
+/** Der Lese-Schlüssel bleibt auf dem Gerät, das ihn erzeugt hat – der Server kennt nur seine Prüfsumme. */
+const LESE_SCHLUESSEL = 'sync.leseSchluessel';
+const SERVER_OHNE_UEBERSICHT =
+  'Dieser Server kennt die Übersicht für Home Assistant noch nicht. Bitte zuerst den Server aktualisieren.';
+
+async function verbunden(): Promise<SyncKonfig> {
+  const konfig = await ladeKonfig();
+  if (!konfig) throw new SyncFehler('server', 'Dieses Gerät ist mit keinem Server verbunden.');
+  return konfig;
+}
+
+/** Der auf diesem Gerät erzeugte Lese-Schlüssel, falls vorhanden. */
+export async function leseSchluesselLokal(): Promise<string | null> {
+  return (await metaLesen<string>(LESE_SCHLUESSEL)) ?? null;
+}
+
+/** Gibt es für diese Truhe einen Lese-Schlüssel (auch wenn ein anderes Gerät ihn erzeugt hat)? */
+export async function leseZugangAktiv(): Promise<boolean> {
+  const daten = await rufe(await verbunden(), '/api/lesezugang', undefined, SERVER_OHNE_UEBERSICHT);
+  return daten.aktiv === true;
+}
+
+/**
+ * Erzeugt einen Lese-Schlüssel: Er öffnet nur die Übersicht der Truhe, nichts lässt sich damit ändern.
+ * Ein bisheriger Schlüssel wird dadurch ungültig.
+ */
+export async function erzeugeLeseSchluessel(): Promise<string> {
+  const daten = await rufe(await verbunden(), '/api/lesezugang', {}, SERVER_OHNE_UEBERSICHT);
+  if (typeof daten.schluessel !== 'string' || daten.schluessel.length < 16) throw new SyncFehler('server', KEIN_SERVER);
+  await metaSchreiben(LESE_SCHLUESSEL, daten.schluessel);
+  return daten.schluessel;
+}
+
+/** Widerruft den Lese-Schlüssel – Home Assistant bekommt danach keine Daten mehr. */
+export async function widerrufeLeseSchluessel(): Promise<void> {
+  await rufe(await verbunden(), '/api/lesezugang', undefined, SERVER_OHNE_UEBERSICHT, 'DELETE');
+  await db.meta.delete(LESE_SCHLUESSEL);
 }
 
 // ---------------------------------------------------------------- Aktualisierung des Servers

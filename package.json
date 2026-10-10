@@ -1,7 +1,7 @@
 {
   "name": "truhenblick",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Gefriertruhen-Management als PWA – auf einen Blick sehen, was wo liegt.",
   "type": "module",
   "scripts": {

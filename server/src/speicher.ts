@@ -25,6 +25,15 @@ export interface Speicher {
   codeSetzen(truheId: string, codeHash: string): void;
   /** Nimmt Änderungen eines Geräts an und liefert alles, was es seit `seit` noch nicht kennt. */
   sync(truheId: string, anfrage: SyncAnfrage): SyncAntwort;
+  /** Der ganze Bestand einer Truhe – für die Übersicht (Home Assistant). */
+  bestand(truheId: string): { bereiche: Bereich[]; artikel: Artikel[] };
+  /**
+   * Lese-Schlüssel: gewährt nur die Übersicht, kein Ändern. Gespeichert wird seine Prüfsumme;
+   * `null` widerruft ihn.
+   */
+  leseSchluesselSetzen(truheId: string, hash: string | null): void;
+  hatLeseSchluessel(truheId: string): boolean;
+  truheMitLeseSchluessel(hash: string): Truhe | null;
   /** Prüfsumme des SYNC_TOKEN, der zuletzt auf die erste Truhe angewandt wurde (siehe app.ts). */
   envHashLesen(): string | null;
   envHashSchreiben(hash: string): void;
@@ -32,14 +41,15 @@ export interface Speicher {
   schliessen(): void;
 }
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS truhen (
     id          TEXT    PRIMARY KEY,
     code_hash   TEXT    NOT NULL UNIQUE,
     rev         INTEGER NOT NULL DEFAULT 0,
-    erstellt_am TEXT    NOT NULL
+    erstellt_am TEXT    NOT NULL,
+    lese_hash   TEXT
   );
   CREATE TABLE IF NOT EXISTS docs (
     truhe        TEXT    NOT NULL,
@@ -107,6 +117,10 @@ export function oeffneSpeicher(pfad: string): Speicher {
     db.transaction(() => {
       uebernehmeAltbestand(db);
       db.exec(SCHEMA);
+      // Seit Version 0.4: Lese-Schlüssel je Truhe
+      const spalten = db.prepare<[], { name: string }>("SELECT name FROM pragma_table_info('truhen')").all();
+      if (!spalten.some((s) => s.name === 'lese_hash')) db.exec('ALTER TABLE truhen ADD COLUMN lese_hash TEXT');
+      db.exec('CREATE UNIQUE INDEX IF NOT EXISTS truhen_lese ON truhen (lese_hash) WHERE lese_hash IS NOT NULL');
       db.pragma(`user_version = ${SCHEMA_VERSION}`);
     })();
   }
@@ -141,6 +155,10 @@ export function oeffneSpeicher(pfad: string): Speicher {
     'SELECT daten FROM docs WHERE truhe = ? AND tabelle = ? AND rev > ? ORDER BY rev',
   );
   const zaehlen = db.prepare<[], { n: number }>('SELECT COUNT(*) AS n FROM docs');
+  const alleDocs = db.prepare<[string, Tabelle], { daten: string }>('SELECT daten FROM docs WHERE truhe = ? AND tabelle = ?');
+  const truheNachLese = db.prepare<[string], TruheZeile>('SELECT id, rev, erstellt_am FROM truhen WHERE lese_hash = ?');
+  const leseSetzen = db.prepare<[string | null, string]>('UPDATE truhen SET lese_hash = ? WHERE id = ?');
+  const leseLesen = db.prepare<[string], { lese_hash: string | null }>('SELECT lese_hash FROM truhen WHERE id = ?');
 
   const truheAnlegen = db.transaction((codeHash: string): Truhe => {
     const id = randomUUID();
@@ -188,6 +206,15 @@ export function oeffneSpeicher(pfad: string): Speicher {
       codeAendern.run(codeHash, truheId);
     },
     sync: (truheId, anfrage) => sync.immediate(truheId, anfrage),
+    bestand: (truheId) => ({
+      bereiche: alleDocs.all(truheId, 'bereiche').map((z) => JSON.parse(z.daten) as Bereich),
+      artikel: alleDocs.all(truheId, 'artikel').map((z) => JSON.parse(z.daten) as Artikel),
+    }),
+    leseSchluesselSetzen: (truheId, hash) => {
+      leseSetzen.run(hash, truheId);
+    },
+    hatLeseSchluessel: (truheId) => Boolean(leseLesen.get(truheId)?.lese_hash),
+    truheMitLeseSchluessel: (hash) => alsTruhe(truheNachLese.get(hash)),
     envHashLesen: () => metaLesen.get('env_hash')?.value ?? null,
     envHashSchreiben: (hash) => {
       metaSchreiben.run('env_hash', hash);

@@ -3,6 +3,7 @@ import { IosAnleitung } from '../components/InstallHinweis.tsx';
 import { installiere, useInstallation } from '../hooks/useInstallation.ts';
 import { Aktualisierung } from './Aktualisierung.tsx';
 import { Datensicherung } from './Datensicherung.tsx';
+import { HomeAssistant } from './HomeAssistant.tsx';
 import { SyncEinstellungen } from './SyncEinstellungen.tsx';
 import { TruheBearbeiten } from './TruheBearbeiten.tsx';
 
@@ -74,6 +75,13 @@ export function Einstellungen() {
         hinweis="Optional: Mit einem eigenen Truhenblick-Server sehen alle Geräte im Haushalt denselben Stand. Ohne Server bleibt alles auf diesem Gerät."
       >
         <SyncEinstellungen />
+      </Abschnitt>
+
+      <Abschnitt
+        titel="Home Assistant"
+        hinweis="Zeigt im Home-Assistant-Dashboard, was in der Truhe bald abläuft. Dort muss nichts installiert werden."
+      >
+        <HomeAssistant />
       </Abschnitt>
 
       <Abschnitt

@@ -12,11 +12,13 @@ Hängekörbe, Ebenen und Fächer als Kacheln, darin die Artikel als farbige Chip
 - Suche mit Hervorhebung des Fundorts, Filter nach Kategorie, sortierbare Liste, „Bald verbrauchen“
 - Rückgängig nach Entnehmen und Ändern, JSON-Backup, Dark Mode nach Systemeinstellung
 - Optional: eigener Sync-Server – beim Anlegen einer Truhe entsteht ein Code, mit dem weitere Geräte beitreten
+- Optional: Anbindung an Home Assistant – das Dashboard zeigt, was bald abläuft
 
 **Inhalt:** [Lokal starten](#lokal-starten) · [Anpassen](#anpassen) · [Installation](#installation) ·
 [HTTPS und Reverse Proxy](#https-und-reverse-proxy) · [Updates](#updates) ·
 [Backup und Restore](#backup-und-restore) · [Abgleich zwischen Geräten](#abgleich-zwischen-geräten) ·
-[PWA testen](#pwa-testen) · [Tests](#tests) · [Stand der Prüfungen](#stand-der-prüfungen)
+[Home Assistant](#home-assistant) · [PWA testen](#pwa-testen) · [Tests](#tests) ·
+[Stand der Prüfungen](#stand-der-prüfungen)
 
 ---
 
@@ -57,13 +59,14 @@ auch lokal einen Code.
 
 ```
 src/
-  config/       Kategorien, Haltbarkeiten, Einheiten, Ampel-Schwelle  ← zum Anpassen gedacht
-  logic/        reine Datenlogik: Datum, Haltbarkeit, Vorschläge, Suche, Truhenstruktur (+ Tests)
+  logic/        reine Datenlogik: Vorschläge, Suche, Truhenstruktur, Home-Assistant-Konfiguration (+ Tests)
   db/           IndexedDB (Dexie): Schema, Schreiboperationen, Backup (+ Tests)
   sync/         Abgleich mit dem Sync-Server (+ Tests)
   components/   Truhengrafik, Chips, Listenzeile, Suche, Filter, Navigation, Hinweise
   pages/        Truhe, Liste, Bald verbrauchen, Einstellungen, Einrichtung, Artikelformular
-shared/         Typen, Prüfungen und die Konfliktregel – von App UND Server verwendet
+shared/         von App UND Server verwendet: Typen, Prüfungen, Konfliktregel, Datum und Haltbarkeit,
+                Übersicht für Home Assistant (+ Tests)
+  config/       Kategorien, Haltbarkeiten, Einheiten, Ampel-Schwelle  ← zum Anpassen gedacht
 server/         Sync-Backend (Hono + SQLite)
 install/        Proxmox-Skript, Einrichtung im Container, Update-Skript
 docker/         Caddy-Konfiguration für das Docker-Image
@@ -76,13 +79,14 @@ Die fachlichen Stellschrauben stehen in drei kleinen Dateien:
 
 | Datei | Inhalt |
 | --- | --- |
-| `src/config/kategorien.ts` | Kategorien mit Symbol und Standardhaltbarkeit in Monaten; Stichwörter für feinere Vorschläge (z. B. *Hackfleisch → 3 Monate*, *Gemüse → 12 Monate*) |
-| `src/config/einheiten.ts` | Einheiten und die Schrittweite der −/+-Knöpfe (z. B. 100 g) |
-| `src/config/ampel.ts` | ab wie vielen Resttagen ein Artikel als „bald verbrauchen“ gilt (Standard: 30) |
+| `shared/config/kategorien.ts` | Kategorien mit Symbol und Standardhaltbarkeit in Monaten; Stichwörter für feinere Vorschläge (z. B. *Hackfleisch → 3 Monate*, *Gemüse → 12 Monate*) |
+| `shared/config/einheiten.ts` | Einheiten und die Schrittweite der −/+-Knöpfe (z. B. 100 g) |
+| `shared/config/ampel.ts` | ab wie vielen Resttagen ein Artikel als „bald verbrauchen“ gilt (Standard: 30) |
 
-Nach einer Änderung neu bauen. Bei einer Installation per Proxmox-Skript liegen die Quellen im Container unter
-`/opt/truhenblick/src`; `truhenblick-update --force` baut neu und versucht, eigene Anpassungen über spätere Updates
-hinweg zu erhalten.
+Die Dateien gelten für die App und für den Server (der damit die Übersicht für Home Assistant berechnet). Nach
+einer Änderung neu bauen. Bei einer Installation per Proxmox-Skript liegen die Quellen im Container unter
+`/opt/truhenblick/src`; `truhenblick-update --force` baut neu, startet den Server neu und versucht, eigene
+Anpassungen über spätere Updates hinweg zu erhalten.
 
 ---
 
@@ -444,7 +448,9 @@ Mehr ist nicht nötig; auf dem Server muss dafür nichts eingestellt werden.
   `geaendertAm`). Das gilt für den ganzen Artikel, nicht feldweise. Die Uhren der Geräte sollten deshalb
   ungefähr stimmen.
 - **Schnittstelle:** `GET /api/health` und `POST /api/truhen` ohne Anmeldung; mit dem Code als
-  `Authorization: Bearer …`: `POST /api/sync`, `POST /api/code`, `GET`/`POST /api/update`.
+  `Authorization: Bearer …`: `POST /api/sync`, `POST /api/code`, `GET`/`POST /api/update`,
+  `GET`/`POST`/`DELETE /api/lesezugang`. `GET /api/uebersicht` geht auch mit dem Lese-Schlüssel
+  (siehe [Home Assistant](#home-assistant)).
 
 ### Wer darf was?
 
@@ -480,6 +486,177 @@ in der App erzeugten Code; die Daten der Truhe bleiben erhalten. Für weitere Tr
 **Von Version 0.2 kommend:** Der bisherige einzige Datenbestand wird beim ersten Start zur ersten Truhe, mit
 demselben Code. Verbundene Geräte gleichen ohne Unterbrechung weiter ab.
 
+## Home Assistant
+
+Home Assistant kann anzeigen, was in der Truhe bald abläuft – als Karte im Dashboard, als Zahl in einer Kachel
+oder als Auslöser für eine Erinnerung. Voraussetzung ist das Sync-Backend mit einer freigegebenen Truhe, denn
+Home Assistant fragt den Server ab, nicht das Handy. In Home Assistant selbst wird nichts installiert; es genügt
+die eingebaute [RESTful-Integration](https://www.home-assistant.io/integrations/rest/).
+
+### Einrichten
+
+1. **In der App:** *Einstellungen → Home Assistant → Für Home Assistant einrichten*. Dabei entsteht ein
+   **Lese-Schlüssel**, und die App zeigt drei fertige Textblöcke zum Kopieren. Im Feld darüber steht die
+   Adresse, unter der Home Assistant den Truhenblick-Server erreicht – bei Bedarf anpassen (im Heimnetz z. B.
+   `http://192.168.1.50`; `localhost` funktioniert nicht, das wäre Home Assistant selbst).
+2. **`secrets.yaml`** von Home Assistant: den ersten Block eintragen.
+
+   ```yaml
+   truhenblick_zugang: "Bearer lese-k7m2-9xqp-4hrt-w3vn-8dzj"
+   ```
+
+3. **`configuration.yaml`:** den zweiten Block einfügen. Gibt es dort schon einen Abschnitt `rest:`, dann nur
+   die Zeilen ab `- resource:` anhängen.
+
+   ```yaml
+   rest:
+     - resource: "http://192.168.1.50/api/uebersicht?zeitzone=Europe%2FBerlin"
+       headers:
+         Authorization: !secret truhenblick_zugang
+       scan_interval: 600
+       timeout: 20
+       sensor:
+         - name: "Truhenblick aufbrauchen"
+           unique_id: truhenblick_aufbrauchen
+           icon: mdi:fridge-alert-outline
+           unit_of_measurement: "Artikel"
+           value_template: "{{ value_json.faellig }}"
+           availability: "{{ value_json is defined and value_json.faellig is defined }}"
+           json_attributes:
+             - liste
+             - text
+             - naechster
+             - gekuerzt
+         - name: "Truhenblick abgelaufen"
+           unique_id: truhenblick_abgelaufen
+           icon: mdi:alert-circle-outline
+           unit_of_measurement: "Artikel"
+           value_template: "{{ value_json.ueberfaellig }}"
+           availability: "{{ value_json is defined and value_json.faellig is defined }}"
+         - name: "Truhenblick Artikel"
+           unique_id: truhenblick_artikel
+           icon: mdi:fridge-outline
+           unit_of_measurement: "Artikel"
+           value_template: "{{ value_json.artikel }}"
+           availability: "{{ value_json is defined and value_json.faellig is defined }}"
+   ```
+
+   Die Zeilen `availability:` sorgen dafür, dass die Sensoren „nicht verfügbar“ zeigen, wenn der Server nicht
+   antwortet oder den Schlüssel ablehnt – ohne sie blieben in Home Assistant die alten Werte stehen.
+
+4. **Home Assistant neu starten.** Danach gibt es drei Sensoren, die alle zehn Minuten aktualisiert werden:
+
+   | Sensor | Wert |
+   | --- | --- |
+   | `sensor.truhenblick_aufbrauchen` | Anzahl der Artikel, die bald ablaufen oder schon überfällig sind. Attribute: `liste` (die Artikel, Dringendes zuerst), `text` (z. B. „3 bald fällig, 2 überfällig“), `naechster`, `gekuerzt` |
+   | `sensor.truhenblick_abgelaufen` | Anzahl der überfälligen Artikel |
+   | `sensor.truhenblick_artikel` | Anzahl aller Artikel in der Truhe |
+
+5. **Dashboard:** *Karte hinzufügen → Manuell* und den dritten Block einfügen. Die Karte listet, was zuerst weg
+   sollte, mit Menge, Restzeit und Platz in der Truhe:
+
+   ```yaml
+   type: markdown
+   title: Gefriertruhe
+   content: |-
+     {% set liste = state_attr('sensor.truhenblick_aufbrauchen', 'liste') %}
+     {% if liste is none %}
+     Truhenblick ist gerade nicht erreichbar.
+     {% elif liste | count == 0 %}
+     ✅ Nichts läuft demnächst ab.
+     {% else %}
+     {% for a in liste %}
+     - {{ '⚠️' if a.status == 'ueberfaellig' else '⏳' }} {{ a.emoji }} **{{ a.name }}** · {{ a.menge }} · {{ a.text }} · _{{ a.ort }}_
+     {% endfor %}
+     {% if state_attr('sensor.truhenblick_aufbrauchen', 'gekuerzt') %}… und weitere{% endif %}
+     {% endif %}
+   ```
+
+   Das ergibt zum Beispiel:
+
+   > - ⚠️ 🍲 **Lasagne** · 2 Portionen · 5 Tage überfällig · _Mitte › Links_
+   > - ⏳ 🌭 **Bratwürste** · 8 Stück · noch 5 Tage · _Korb links_
+   > - ⏳ 🐟 **Lachsfilet** · 400 g · noch 15 Tage · _Oben › Links_
+
+Die Sensoren lassen sich wie alle anderen verwenden. Eine tägliche Erinnerung könnte so aussehen
+(`notify.notify` durch den eigenen Benachrichtigungsdienst ersetzen):
+
+```yaml
+automation:
+  - alias: "Gefriertruhe: Erinnerung ans Aufbrauchen"
+    triggers:
+      - trigger: time
+        at: "17:00:00"
+    conditions:
+      - condition: numeric_state
+        entity_id: sensor.truhenblick_aufbrauchen
+        above: 0
+    actions:
+      - action: notify.notify
+        data:
+          title: "Gefriertruhe"
+          message: "{{ state_attr('sensor.truhenblick_aufbrauchen', 'text') }}"
+```
+
+### Der Lese-Schlüssel
+
+- Er öffnet **nur die Übersicht dieser einen Truhe** – ändern, den Zugangscode erneuern oder den Server
+  aktualisieren kann man damit nicht. Deshalb bekommt Home Assistant ihn und nicht den Zugangscode.
+- Je Truhe gibt es einen. *Neuen Schlüssel erzeugen* macht den bisherigen sofort ungültig, *Zugang widerrufen*
+  schaltet die Abfrage ab; der Sensor zeigt dann „nicht verfügbar“.
+- Anzeigen kann ihn nur das Gerät, das ihn erzeugt hat – auf dem Server liegt nur seine Prüfsumme. Andere
+  Geräte sehen, dass es einen gibt, und können ihn ersetzen oder widerrufen.
+- Im Heimnetz genügt `http://`. Fragt Home Assistant über das Internet ab, gehört der Schlüssel nur über HTTPS
+  auf die Reise.
+- Durchprobieren wird gebremst wie beim Zugangscode: Nach zehn falschen Versuchen ist eine Adresse zehn
+  Minuten gesperrt.
+
+### Die Abfrage
+
+`GET /api/uebersicht` mit `Authorization: Bearer <Lese-Schlüssel>` (der Zugangscode der Truhe geht ebenfalls):
+
+| Parameter | Standard | Bedeutung |
+| --- | --- | --- |
+| `zeitzone` | Zeitzone des Servers | bestimmt, welcher Tag „heute“ ist, z. B. `Europe/Berlin` |
+| `tage` | `30` | ab so vielen Resttagen gilt ein Artikel als „bald fällig“ |
+| `limit` | `20` | Höchstzahl der Einträge in `liste` (höchstens 200) |
+
+```bash
+curl -H "Authorization: Bearer lese-…" "http://192.168.1.50/api/uebersicht?zeitzone=Europe/Berlin&tage=14"
+```
+
+```json
+{
+  "stand": "2026-10-10T12:28:41.512Z",
+  "heute": "2026-10-10",
+  "schwelle_tage": 14,
+  "artikel": 16,
+  "frisch": 13,
+  "bald": 1,
+  "ueberfaellig": 2,
+  "faellig": 3,
+  "text": "1 bald fällig, 2 überfällig",
+  "naechster": { "name": "Brötchen", "…": "…" },
+  "liste": [
+    {
+      "name": "Lasagne",
+      "emoji": "🍲",
+      "kategorie": "fertig",
+      "menge": "2 Portionen",
+      "ort": "Mitte › Links",
+      "haltbar_bis": "2026-10-05",
+      "tage": -5,
+      "status": "ueberfaellig",
+      "text": "5 Tage überfällig"
+    }
+  ],
+  "gekuerzt": false
+}
+```
+
+Home Assistant speichert Attribute nur bis 16 kB im Verlauf. Mit dem Standard von 20 Einträgen bleibt die Liste
+weit darunter; wer `limit` deutlich erhöht, sollte das im Blick behalten.
+
 ## PWA testen
 
 Service Worker gibt es nur im Produktions-Build:
@@ -507,13 +684,13 @@ npm run preview        # http://localhost:4173 – localhost gilt als sichere He
 
 | Was | Befehl | Umfang |
 | --- | --- | --- |
-| Datenlogik der App | `npm test` | Datum und Haltbarkeit, Vorschläge, Suche, Truhenstruktur, Konfliktregel, Datenbankoperationen, Backup, Sync-Client |
-| Sync-Backend | `cd server && npm test` | Anmeldung, Eingabeprüfung, Abgleich und Konflikte gegen eine SQLite-Datenbank im Speicher |
+| Datenlogik der App | `npm test` | Datum und Haltbarkeit, Vorschläge, Suche, Truhenstruktur, Konfliktregel, Datenbankoperationen, Backup, Sync-Client, Übersicht und Konfiguration für Home Assistant |
+| Sync-Backend | `cd server && npm test` | Anmeldung, Eingabeprüfung, Abgleich und Konflikte, Lese-Schlüssel und Übersicht gegen eine SQLite-Datenbank im Speicher |
 | Proxmox-Skript | `npm run test:install` | Optionen, Rückfragen, Prüfungen und Aufräumen nach Fehlern – mit nachgebildeten Proxmox-Befehlen |
 
 ## Stand der Prüfungen
 
-Was bisher wie geprüft wurde (Stand: Version 0.3.0):
+Was bisher wie geprüft wurde (Stand: Version 0.4.0):
 
 - **App:** automatisierte Tests sowie Durchläufe im Browser (Chrome, Handy- und Desktop-Breite, hell und dunkel)
   einschließlich Offline-Betrieb und Update-Hinweis am Produktions-Build.
@@ -535,6 +712,14 @@ Was bisher wie geprüft wurde (Stand: Version 0.3.0):
   mit einem absichtlich fehlschlagenden Lauf, mit mehreren gleichzeitigen Anfragen und mit der Prüfung, dass
   nur die erste Truhe es anstoßen darf. Die Bedienung in der App wurde dabei gegen ein Backend mit
   nachgestelltem Update-Dienst geprüft, nicht gegen den Container.
+- **Home Assistant:** Der Lese-Schlüssel wurde in der App erzeugt, widerrufen und neu erzeugt (der alte wird
+  danach abgewiesen). Die erzeugte Konfiguration lief unverändert in einem echten Home Assistant (2026.10, als
+  Container neben dem Docker-Stack): Die drei Sensoren zeigten die erwarteten Werte samt Liste, die Vorlage der
+  Karte ergab die erwarteten Zeilen, die Konfigurationsprüfung von Home Assistant meldete nichts. Auch die
+  Störfälle liefen dort: Schlüssel widerrufen, Server aus, nur das Backend aus – die Sensoren wurden jeweils
+  „nicht verfügbar“ und erholten sich danach von selbst (dafür mit 15 Sekunden statt zehn Minuten Abstand
+  zwischen den Abfragen). **Nicht** geprüft: die Karte in einem echten Dashboard (nur ihre Vorlage), das
+  Beispiel für die Erinnerung und Home Assistant OS mit einem Truhenblick im Proxmox-Container.
 - **Docker:** beide Images gebaut und als Compose-Stack gestartet (nur App, mit Sync-Backend, mit eigenem HTTPS
   über `SITE_ADDRESS`), Daten überstehen einen Neustart. ARM64 wurde unter Emulation gebaut und gestartet,
   **nicht** auf einem echten Raspberry Pi. Das Abholen eines echten Zertifikats (Let's Encrypt) ist ungetestet.

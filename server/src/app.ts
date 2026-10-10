@@ -4,6 +4,7 @@ import { Hono, type Context, type MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { cors } from 'hono/cors';
 import type { SyncAnfrage, UpdateStand } from '../../shared/types.ts';
+import { berechneUebersicht, heuteIn } from '../../shared/uebersicht.ts';
 import { bereinigeArtikel, bereinigeBereich, istArtikel, istBereich } from '../../shared/validierung.ts';
 import type { Speicher, Truhe } from './speicher.ts';
 import type { UpdateDienst } from './update.ts';
@@ -154,7 +155,7 @@ export function erstelleApp({
       '/api/*',
       cors({
         origin: corsOrigins.includes('*') ? '*' : corsOrigins,
-        allowMethods: ['GET', 'POST', 'OPTIONS'],
+        allowMethods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
         allowHeaders: ['Authorization', 'Content-Type'],
         maxAge: 86_400,
       }),
@@ -212,6 +213,68 @@ export function erstelleApp({
   app.use('/api/sync', anmeldung);
   app.use('/api/code', anmeldung);
   app.use('/api/update', anmeldung);
+  app.use('/api/lesezugang', anmeldung);
+
+  // Die Übersicht darf auch mit dem Lese-Schlüssel abgerufen werden – er öffnet sonst nichts.
+  const leseAnmeldung: MiddlewareHandler<Umgebung> = async (c, next) => {
+    const adresse = adresseVon(c);
+    const jetzt = Date.now();
+    if (fehlversuche.erreicht(adresse, jetzt)) {
+      return c.json({ fehler: 'Zu viele Fehlversuche. Bitte später erneut versuchen.' }, 429);
+    }
+    const kopf = c.req.header('authorization') ?? '';
+    const gesendet = kopf.startsWith('Bearer ') ? kopf.slice(7).trim() : '';
+    const pruefsumme = gesendet ? hash(gesendet) : '';
+    const truhe = gesendet ? (speicher.truheMitLeseSchluessel(pruefsumme) ?? speicher.truheMitCode(pruefsumme)) : null;
+    if (!truhe) {
+      fehlversuche.merke(adresse, jetzt);
+      return c.json({ fehler: 'Lese-Schlüssel fehlt oder ist falsch.' }, 401);
+    }
+    fehlversuche.vergiss(adresse);
+    c.set('truhe', truhe);
+    await next();
+  };
+  app.use('/api/uebersicht', leseAnmeldung);
+
+  // Übersicht für Home Assistant & Co.: Zähler und die Liste dessen, was bald abläuft.
+  //   ?zeitzone=Europe/Berlin  bestimmt, welcher Tag „heute“ ist (Standard: Zeitzone des Servers)
+  //   ?tage=14                 Schwelle für „bald fällig“ (Standard: wie in der App)
+  //   ?limit=20                Höchstzahl der Einträge in der Liste
+  app.get('/api/uebersicht', (c) => {
+    const zahl = (name: string, min: number, max: number): number | undefined | null => {
+      const roh = c.req.query(name);
+      if (roh === undefined || roh === '') return undefined;
+      const n = Number(roh);
+      return Number.isInteger(n) && n >= min && n <= max ? n : null;
+    };
+    const tage = zahl('tage', 0, 3650);
+    const limit = zahl('limit', 0, 200);
+    if (tage === null || limit === null) return c.json({ fehler: 'tage und limit müssen ganze Zahlen sein.' }, 400);
+
+    let heute: string;
+    try {
+      heute = heuteIn(c.req.query('zeitzone') || Intl.DateTimeFormat().resolvedOptions().timeZone);
+    } catch {
+      return c.json({ fehler: 'Unbekannte Zeitzone. Beispiel: zeitzone=Europe/Berlin' }, 400);
+    }
+    const { bereiche, artikel } = speicher.bestand(c.get('truhe').id);
+    return c.json(berechneUebersicht(bereiche, artikel, heute, { tage, limit }));
+  });
+
+  // Lese-Schlüssel verwalten (nur mit dem Zugangscode der Truhe).
+  app.get('/api/lesezugang', (c) => c.json({ aktiv: speicher.hatLeseSchluessel(c.get('truhe').id) }));
+  app.post('/api/lesezugang', (c) => {
+    // Ein neuer Schlüssel ersetzt den bisherigen.
+    const schluessel = `lese-${erzeugeCode()}`;
+    speicher.leseSchluesselSetzen(c.get('truhe').id, hash(schluessel));
+    melde('Ein Lese-Schlüssel wurde erzeugt.');
+    return c.json({ schluessel });
+  });
+  app.delete('/api/lesezugang', (c) => {
+    speicher.leseSchluesselSetzen(c.get('truhe').id, null);
+    melde('Ein Lese-Schlüssel wurde widerrufen.');
+    return c.json({ aktiv: false });
+  });
 
   app.post(
     '/api/sync',

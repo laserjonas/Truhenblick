@@ -163,7 +163,7 @@ sichere_datenbank
 schritt "Quellen aktualisieren"
 EIGENE_AENDERUNGEN=0
 if [[ -n "$(git -C "$QUELLE" status --porcelain --untracked-files=no)" ]]; then
-  # Eigene Anpassungen (z. B. an src/config/kategorien.ts) über das Update retten
+  # Eigene Anpassungen (z. B. an shared/config/kategorien.ts) über das Update retten
   EIGENE_AENDERUNGEN=1
   git -C "$QUELLE" -c user.name=truhenblick -c user.email=truhenblick@localhost stash push --quiet -m "vor Update $(date +%F)"
 fi

@@ -21,11 +21,11 @@ export interface Bereich extends SyncDoc {
 
 export interface Artikel extends SyncDoc {
   name: string;
-  /** Kategorie-ID aus src/config/kategorien.ts */
+  /** Kategorie-ID aus shared/config/kategorien.ts */
   kategorie: string;
   emoji: string;
   menge: number;
-  /** Einheiten-ID aus src/config/einheiten.ts */
+  /** Einheiten-ID aus shared/config/einheiten.ts */
   einheit: string;
   /** Datum im Format JJJJ-MM-TT */
   eingefrorenAm: string;

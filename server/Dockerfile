@@ -20,7 +20,8 @@ RUN cd server \
  && npm cache clean --force \
  && node -e "new (require('better-sqlite3'))(':memory:').close()"
 
-COPY shared/package.json shared/types.ts shared/sync.ts shared/validierung.ts shared/
+# shared/: Typen, Regeln und die Konfiguration (Kategorien, Haltbarkeiten), die App und Server teilen
+COPY shared shared
 COPY server/src server/src
 
 RUN mkdir -p /data && chown node:node /data

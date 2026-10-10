@@ -504,6 +504,10 @@ Was bisher wie geprüft wurde (Stand: Version 0.2.0):
   `truhenblick-update` wurde dort mit echten neuen Versionen, mit eigenen Anpassungen an den Quellen und über
   `pct exec` geprüft. **Nicht** getestet: privilegierte Container, VLAN-Tags, andere Storage-Typen als LVM-Thin,
   Proxmox VE 8 und ältere.
+- **Zugangscode und Aktualisierung in der App:** im Browser mit zwei Geräten durchgespielt (Code anzeigen,
+  neu erzeugen, auf dem zweiten Gerät eingeben; Update anstoßen, Fortschritt, Neuladen, Fehlschlag mit
+  Protokoll). Das Anstoßen eines Updates über die Schnittstelle lief auch im Proxmox-Container, einschließlich
+  eines absichtlich fehlschlagenden Laufs.
 - **Docker:** beide Images gebaut und als Compose-Stack gestartet (nur App, mit Sync-Backend, mit eigenem HTTPS
   über `SITE_ADDRESS`), Daten überstehen einen Neustart. ARM64 wurde unter Emulation gebaut und gestartet,
   **nicht** auf einem echten Raspberry Pi. Das Abholen eines echten Zertifikats (Let's Encrypt) ist ungetestet.

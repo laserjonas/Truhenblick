@@ -513,23 +513,28 @@ npm run preview        # http://localhost:4173 – localhost gilt als sichere He
 
 ## Stand der Prüfungen
 
-Was bisher wie geprüft wurde (Stand: Version 0.2.1):
+Was bisher wie geprüft wurde (Stand: Version 0.3.0):
 
 - **App:** automatisierte Tests sowie Durchläufe im Browser (Chrome, Handy- und Desktop-Breite, hell und dunkel)
   einschließlich Offline-Betrieb und Update-Hinweis am Produktions-Build.
-- **Abgleich:** Ende-zu-Ende mit zwei getrennten Browsern – gegen das lokal gestartete Backend, gegen den
-  Docker-Stack und gegen einen Proxmox-Container.
+- **Truhe anlegen, beitreten, abgleichen:** Ende-zu-Ende mit drei getrennten Browsern gegen das lokal gestartete
+  Backend und gegen den Docker-Stack: anlegen mit Code, beitreten mit falschem und richtigem Code, Abgleich in
+  beide Richtungen, eine zweite Truhe bleibt getrennt, trennen und neu freigeben. Im Proxmox-Container wurden
+  dieselben Abläufe über die Schnittstelle geprüft, nicht über die App.
+- **Update von 0.2 auf 0.3:** im Proxmox-Container gelaufen – der bisherige Datenbestand wurde zur ersten Truhe,
+  mit gleicher Kennung, gleichem Stand und dem bisherigen Code.
 - **Proxmox-Skript:** auf einem echten Host getestet (Proxmox VE 9.2, Debian-12-Template, unprivilegierter
   Container): ohne Rückfragen, mit Rückfragen im Terminal und über die whiptail-Dialoge; DHCP und statische IP;
   mit und ohne Sync-Backend; Abbruch durch Fehler und durch Strg+C mit anschließendem Aufräumen.
   `truhenblick-update` wurde dort mit echten neuen Versionen, mit eigenen Anpassungen an den Quellen und über
   `pct exec` geprüft. **Nicht** getestet: privilegierte Container, VLAN-Tags, andere Storage-Typen als LVM-Thin,
   Proxmox VE 8 und ältere.
-- **Zugangscode und Aktualisierung in der App:** im Browser mit zwei Geräten durchgespielt (Code anzeigen,
+- **Code erneuern und Aktualisierung in der App:** im Browser mit zwei Geräten durchgespielt (Code anzeigen,
   neu erzeugen, auf dem zweiten Gerät eingeben; Update anstoßen, Fortschritt, Neuladen, Fehlschlag mit
   Protokoll). Das Update über die Schnittstelle lief auch im Proxmox-Container: erfolgreich (rund 20 Sekunden),
-  mit einem absichtlich fehlschlagenden Lauf und mit mehreren gleichzeitigen Anfragen. Die Bedienung in der App
-  wurde dabei gegen ein Backend mit nachgestelltem Update-Dienst geprüft, nicht gegen den Container.
+  mit einem absichtlich fehlschlagenden Lauf, mit mehreren gleichzeitigen Anfragen und mit der Prüfung, dass
+  nur die erste Truhe es anstoßen darf. Die Bedienung in der App wurde dabei gegen ein Backend mit
+  nachgestelltem Update-Dienst geprüft, nicht gegen den Container.
 - **Docker:** beide Images gebaut und als Compose-Stack gestartet (nur App, mit Sync-Backend, mit eigenem HTTPS
   über `SITE_ADDRESS`), Daten überstehen einen Neustart. ARM64 wurde unter Emulation gebaut und gestartet,
   **nicht** auf einem echten Raspberry Pi. Das Abholen eines echten Zertifikats (Let's Encrypt) ist ungetestet.

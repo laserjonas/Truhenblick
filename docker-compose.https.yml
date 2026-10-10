@@ -1,11 +1,21 @@
-# Zusatz für den Betrieb OHNE vorgeschalteten Reverse Proxy:
-# Caddy im Container holt selbst ein Zertifikat für die Domain aus SITE_ADDRESS.
-# Voraussetzung: Die Domain zeigt auf diesen Rechner, Ports 80 und 443 sind von außen erreichbar.
+# Zusatz für den Betrieb OHNE vorgeschalteten Reverse Proxy: gibt Port 443 frei, damit Truhenblick
+# selbst ein HTTPS-Zertifikat holen kann.
 #
 #   docker compose -f docker-compose.yml -f docker-compose.https.yml --profile sync up -d --build
+#
+# Danach in der App: Einstellungen → Server → „Truhenblick holt das Zertifikat selbst“ und die
+# Adresse eintragen. Voraussetzung: Die Adresse zeigt auf diesen Rechner, die Ports 80 und 443 sind
+# von außen erreichbar. Das Sync-Backend muss laufen (--profile sync) – es entscheidet, für welche
+# Adresse ein Zertifikat geholt wird.
 
 services:
   web:
     ports:
       - "${HTTPS_PORT:-443}:443"
       - "${HTTPS_PORT:-443}:443/udp"
+
+  api:
+    environment:
+      # Wer bisher SITE_ADDRESS=truhe.example.de in der .env hatte, behält damit seine Adresse.
+      START_ADRESSE: ${START_ADRESSE:-${SITE_ADDRESS:-}}
+      START_ERREICHBARKEIT: ${START_ERREICHBARKEIT:-selbst}

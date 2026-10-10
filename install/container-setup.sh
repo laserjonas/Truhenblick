@@ -19,6 +19,12 @@
 #   TB_REPO        Git-Adresse der Quellen
 #   TB_BRANCH      Zweig                                    (main)
 #   TB_APP_UPDATE  1 = Updates lassen sich in der App anstoßen, 0 = nur von Hand (1)
+#   TB_HTTPS       1 = Port 443 bereithalten, damit Truhenblick auf Wunsch selbst ein
+#                  Zertifikat holt (einzustellen in der App), 0 = nur der Port oben  (1)
+#
+# Unter welcher Adresse der Server erreichbar ist, ob ein Reverse Proxy davor sitzt und ob man sich
+# mit einem Passwort anmelden muss, wird nicht hier eingestellt, sondern in der App:
+# Einstellungen → Server.
 #
 # Aufruf mit --update: Systempakete werden nur ergänzt, wenn etwas fehlt.
 
@@ -71,6 +77,7 @@ command -v apt-get >/dev/null || abbruch "Dieses Skript braucht ein Debian- oder
 # Reihenfolge: Umgebung > Übergabedatei des Proxmox-Skripts > gespeicherte Werte > Standard
 UMGEBUNG_PORT="${TB_PORT:-}"; UMGEBUNG_SYNC="${TB_SYNC:-}"; UMGEBUNG_TOKEN="${TB_SYNC_TOKEN:-}"
 UMGEBUNG_REPO="${TB_REPO:-}"; UMGEBUNG_BRANCH="${TB_BRANCH:-}"; UMGEBUNG_APP_UPDATE="${TB_APP_UPDATE:-}"
+UMGEBUNG_HTTPS="${TB_HTTPS:-}"
 
 # shellcheck disable=SC1090
 [[ -f "$KONF" ]] && . "$KONF"
@@ -86,10 +93,12 @@ TB_SYNC_TOKEN="${UMGEBUNG_TOKEN:-${TB_SYNC_TOKEN:-}}"
 TB_REPO="${UMGEBUNG_REPO:-${TB_REPO:-$REPO_STANDARD}}"
 TB_BRANCH="${UMGEBUNG_BRANCH:-${TB_BRANCH:-main}}"
 TB_APP_UPDATE="${UMGEBUNG_APP_UPDATE:-${TB_APP_UPDATE:-1}}"
+TB_HTTPS="${UMGEBUNG_HTTPS:-${TB_HTTPS:-1}}"
 
 [[ "$TB_PORT" =~ ^[0-9]+$ ]] && (( TB_PORT >= 1 && TB_PORT <= 65535 )) || abbruch "TB_PORT ist kein gültiger Port: $TB_PORT"
 [[ "$TB_SYNC" == "0" || "$TB_SYNC" == "1" ]] || abbruch "TB_SYNC muss 0 oder 1 sein."
 [[ "$TB_APP_UPDATE" == "0" || "$TB_APP_UPDATE" == "1" ]] || abbruch "TB_APP_UPDATE muss 0 oder 1 sein."
+[[ "$TB_HTTPS" == "0" || "$TB_HTTPS" == "1" ]] || abbruch "TB_HTTPS muss 0 oder 1 sein."
 if [[ -n "$TB_SYNC_TOKEN" && ${#TB_SYNC_TOKEN} -lt 16 ]]; then
   abbruch "Der Zugangscode muss mindestens 16 Zeichen lang sein."
 fi
@@ -213,9 +222,12 @@ backend_einrichten() {
   [[ -z "$token" ]] && token="$(aus_server_env SYNC_TOKEN)"
   SYNC_TOKEN_AKTUELL="$token"
   # Eigene Einstellungen in der Datei über Updates hinweg erhalten
-  local neue_truhen max_truhen
+  local neue_truhen max_truhen start_adresse start_art
   neue_truhen="$(aus_server_env NEUE_TRUHEN)"
   max_truhen="$(aus_server_env MAX_TRUHEN)"
+  # Aus einer früheren Caddy-Datei übernommen (siehe caddy_altlast_pruefen) – sonst, was schon dasteht
+  start_adresse="${ALT_ADRESSE:-$(aus_server_env START_ADRESSE)}"
+  start_art="${ALT_ERREICHBARKEIT:-$(aus_server_env START_ERREICHBARKEIT)}"
 
   local alt_umask
   alt_umask="$(umask)"
@@ -232,6 +244,11 @@ MAX_TRUHEN=${max_truhen:-10}
 # Freiwillig: Zugangscode der zuerst angelegten Truhe (mindestens 16 Zeichen). Einen neuen Wert
 # eintragen, um ihn zurückzusetzen, wenn kein Gerät den Code mehr kennt.
 SYNC_TOKEN=$token
+
+# Adresse (z. B. truhe.example.de), Reverse Proxy und Passwort werden in der App eingestellt:
+# Einstellungen → Server. Die beiden Werte hier gelten nur, solange dort noch nichts eingestellt wurde.
+START_ADRESSE=$start_adresse
+START_ERREICHBARKEIT=$start_art
 
 PORT=$BACKEND_PORT
 HOST=127.0.0.1
@@ -354,22 +371,116 @@ backend_entfernen() {
 
 # ------------------------------------------------------------------ Webserver
 
+# Die Datei ohne Kommentare, Leerzeilen und Einrückung – zum Vergleichen.
+caddy_kern() {
+  sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e '/^#/d' -e '/^$/d' "$1"
+}
+
+# So sah die Datei bis Version 0.4 aus (ohne die erste Zeile mit der Adresse). $1: mit Sync-Backend?
+caddy_kern_alt() {
+  printf '%s\n' 'encode zstd gzip' 'header {' 'X-Content-Type-Options nosniff' 'Referrer-Policy no-referrer' '-Server' '}' 'handle /api/* {'
+  if [[ "$1" == "1" ]]; then
+    printf '%s\n' "reverse_proxy 127.0.0.1:${BACKEND_PORT}"
+  else
+    printf '%s\n' 'respond "Sync-Backend ist nicht installiert." 404'
+  fi
+  printf '%s\n' '}' 'handle {' "root * $WEBROOT" \
+    '@frisch path / /index.html /sw.js /registerSW.js /manifest.webmanifest' 'header @frisch Cache-Control "no-cache"' \
+    '@assets path /assets/*' 'header @assets Cache-Control "public, max-age=31536000, immutable"' \
+    'try_files {path} /index.html' 'file_server' '}' '}'
+}
+
+# Bis Version 0.4 riet die Anleitung, für eigenes HTTPS in der Caddy-Datei „:80“ durch die Adresse
+# zu ersetzen und die erste Zeile zu löschen. Hinter einem Reverse Proxy führt genau das in eine
+# Umleitungsschleife – und nötig ist es nicht mehr: Die Adresse wird in der App eingestellt.
+# Entspricht die Datei bis auf die Adresse der früheren Fassung, wird sie deshalb umgestellt und
+# die Adresse als Startwert an das Backend übergeben. Eine wirklich eigene Datei bleibt, wie sie ist.
+ALT_ADRESSE=""
+ALT_ERREICHBARKEIT=""
+CADDY_UMSTELLEN=0
+
+caddy_altlast_pruefen() {
+  [[ "$TB_SYNC" == "1" && -f "$CADDYFILE" ]] || return 0
+
+  local kern erste rest eintrag name
+  kern="$(caddy_kern "$CADDYFILE")"
+  erste="$(printf '%s\n' "$kern" | head -n1)"
+  rest="$(printf '%s\n' "$kern" | tail -n +2)"
+  # Erste Zeile: „<Adresse> {“
+  [[ "$erste" == *' {' ]] || return 0
+  eintrag="${erste% \{}"
+  [[ -n "$eintrag" && "$eintrag" != *[[:space:]]* ]] || return 0
+  [[ "$rest" == "$(caddy_kern_alt 1)" || "$rest" == "$(caddy_kern_alt 0)" ]] || return 0
+
+  # Zählt nur, wenn die Markierung fehlt – mit ihr wird die Datei ohnehin neu geschrieben.
+  CADDY_UMSTELLEN=1
+  name="${eintrag#http://}"; name="${name#https://}"; name="${name%%:*}"
+  # Nur ein richtiger Name (mit Punkt, keine IP) ist eine Adresse – „:8080“ ist bloß ein Port.
+  if [[ "$name" == *.* && ! "$name" =~ ^[0-9.]+$ ]]; then
+    ALT_ADRESSE="$name"
+    # Hat Caddy für den Namen wirklich ein Zertifikat geholt, lief er ohne Proxy. Sonst saß einer davor.
+    if [[ "$eintrag" != http://* && "$eintrag" != *:80 ]] &&
+      compgen -G "/var/lib/caddy/.local/share/caddy/certificates/*/$name/$name.crt" >/dev/null; then
+      ALT_ERREICHBARKEIT=selbst
+    else
+      ALT_ERREICHBARKEIT=proxy
+    fi
+  fi
+}
+
+# Ist Port 443 frei – oder gehört er schon Caddy?
+port_443_frei() {
+  command -v ss >/dev/null 2>&1 || return 0
+  local belegt
+  belegt="$(ss -H -ltnp 'sport = :443' 2>/dev/null || true)"
+  [[ -z "$belegt" || "$belegt" == *caddy* ]]
+}
+
 caddy_einrichten() {
   schritt "Webserver (Caddy) einrichten"
 
   if [[ -f "$CADDYFILE" ]] && ! grep -qF "$CADDY_MARKE" "$CADDYFILE"; then
-    if [[ "$MODUS" == "update" ]]; then
+    if [[ "$CADDY_UMSTELLEN" == "1" ]]; then
+      cp -a "$CADDYFILE" "$CADDYFILE.vor-0.5"
+      warnung "$CADDYFILE enthielt eine von Hand eingetragene Adresse. Das ist nicht mehr nötig und"
+      warnung "stört hinter einem Reverse Proxy – die Datei wird neu geschrieben (alte Fassung: $CADDYFILE.vor-0.5)."
+      if [[ -n "$ALT_ADRESSE" ]]; then
+        warnung "Übernommen: $ALT_ADRESSE ($ALT_ERREICHBARKEIT). Ändern: in der App unter Einstellungen → Server."
+      fi
+    elif [[ "$MODUS" == "update" ]]; then
       warnung "$CADDYFILE wurde von Hand angepasst und bleibt unverändert."
+      warnung "Seit 0.5 gehört die Adresse nicht mehr in diese Datei, sondern in die App (Einstellungen → Server) –"
+      warnung "siehe README, Abschnitt „HTTPS und Reverse Proxy“. Zurück zur Standardfassung: Datei löschen, dann truhenblick-update --force"
       systemctl reload caddy 2>/dev/null || systemctl restart caddy
       return
+    else
+      cp -a "$CADDYFILE" "$CADDYFILE.vor-truhenblick"
     fi
-    cp -a "$CADDYFILE" "$CADDYFILE.vor-truhenblick"
+  fi
+
+  # Port 443 nur, wenn es einen Sinn hat: Das Backend entscheidet, für welchen Namen ein Zertifikat
+  # geholt wird, und Zertifikate gibt es nur über die Ports 80 und 443.
+  local mit_https=0
+  if [[ "$TB_SYNC" == "1" && "$TB_HTTPS" == "1" && "$TB_PORT" == "80" ]]; then
+    if port_443_frei; then
+      mit_https=1
+    else
+      warnung "Port 443 ist auf diesem Rechner schon belegt – Truhenblick hält ihn nicht bereit."
+      warnung "Für HTTPS dann einen Reverse Proxy davor setzen (in der App: Einstellungen → Server)."
+    fi
   fi
 
   local api
   if [[ "$TB_SYNC" == "1" ]]; then
     api="	handle /api/* {
-		reverse_proxy 127.0.0.1:${BACKEND_PORT}
+		# Die Rückfrage vor einem Zertifikat ist nur für Caddy selbst gedacht.
+		@intern path /api/zertifikat
+		respond @intern 404
+
+		reverse_proxy 127.0.0.1:${BACKEND_PORT} {
+			# Einem Reverse Proxy im privaten Netz glauben, von welchem Gerät eine Anfrage stammt.
+			trusted_proxies private_ranges
+		}
 	}"
   else
     api="	# Ohne Sync-Backend installiert
@@ -378,16 +489,32 @@ caddy_einrichten() {
 	}"
   fi
 
-  cat >"$CADDYFILE" <<EOF
+  {
+    cat <<EOF
 $CADDY_MARKE
 # Diese Datei wird bei Updates neu geschrieben. Wer sie selbst pflegen möchte,
 # entfernt die erste Zeile – dann lässt truhenblick-update sie in Ruhe.
 #
-# HTTPS: Ersetze ":${TB_PORT}" durch deine Domain (z. B. truhe.example.de), wenn dieser
-# Rechner aus dem Internet über die Ports 80 und 443 erreichbar ist – Caddy holt
-# sich das Zertifikat dann selbst. Sonst übernimmt das ein vorgeschalteter Reverse Proxy.
+# Hier steht bewusst keine Adresse: Port ${TB_PORT} antwortet unter jedem Namen – der IP im
+# Heimnetz genauso wie dem Namen, unter dem ein vorgeschalteter Reverse Proxy (z. B. Nginx
+# Proxy Manager) die App erreichbar macht. Welche Adresse gilt und wer sich um HTTPS kümmert,
+# wird in der App eingestellt: Einstellungen → Server.
+EOF
+    if [[ "$mit_https" == "1" ]]; then
+      cat <<EOF
+#
+# Port 443 ist für „Truhenblick holt das Zertifikat selbst“ da: Caddy fragt beim Backend nach,
+# ob er für den angefragten Namen eines holen darf, und tut es nur für die eingestellte Adresse.
+{
+	on_demand_tls {
+		ask http://127.0.0.1:${BACKEND_PORT}/api/zertifikat
+	}
+}
+EOF
+    fi
+    cat <<EOF
 
-:${TB_PORT} {
+(truhenblick) {
 	encode zstd gzip
 
 	header {
@@ -405,6 +532,13 @@ $api
 		@frisch path / /index.html /sw.js /registerSW.js /manifest.webmanifest
 		header @frisch Cache-Control "no-cache"
 
+		# Manche Proxys speichern .js-Dateien zwischen, was auch immer oben steht (in Nginx Proxy
+		# Manager: „Cache Assets“). „Vary: *“ verbietet ihnen das für den Service Worker.
+		header /sw.js {
+			Vary "*"
+			defer
+		}
+
 		@assets path /assets/*
 		header @assets Cache-Control "public, max-age=31536000, immutable"
 
@@ -412,13 +546,34 @@ $api
 		file_server
 	}
 }
+
+:${TB_PORT} {
+	import truhenblick
+}
 EOF
+    if [[ "$mit_https" == "1" ]]; then
+      cat <<EOF
+
+https:// {
+	tls {
+		on_demand
+	}
+
+	import truhenblick
+}
+EOF
+    fi
+  } >"$CADDYFILE"
 
   caddy validate --config "$CADDYFILE" --adapter caddyfile >/dev/null 2>&1 ||
     abbruch "Die erzeugte Caddy-Konfiguration ist ungültig: caddy validate --config $CADDYFILE"
   systemctl enable --quiet caddy
   systemctl restart caddy
-  ok "Caddy liefert die App auf Port $TB_PORT aus"
+  if [[ "$mit_https" == "1" ]]; then
+    ok "Caddy liefert die App auf Port $TB_PORT aus (Port 443 steht für ein eigenes Zertifikat bereit)"
+  else
+    ok "Caddy liefert die App auf Port $TB_PORT aus"
+  fi
 }
 
 # ------------------------------------------------------------------ Abschluss
@@ -433,6 +588,7 @@ TB_SYNC=$TB_SYNC
 TB_REPO=$TB_REPO
 TB_BRANCH=$TB_BRANCH
 TB_APP_UPDATE=$TB_APP_UPDATE
+TB_HTTPS=$TB_HTTPS
 EOF
   chmod 644 "$KONF"
   git -C "$QUELLE" rev-parse HEAD >"$ETC/version" 2>/dev/null || true
@@ -443,6 +599,9 @@ werkzeuge_installieren() {
   # „pct exec“ auf dem Proxmox-Host sucht nicht in /usr/local/bin. Mit dem Verweis
   # funktioniert dort auch der kurze Aufruf:  pct exec <ID> -- truhenblick-update
   ln -sf /usr/local/bin/truhenblick-update /usr/bin/truhenblick-update
+  # Notausgang, wenn niemand mehr das Passwort für die Anmeldung kennt
+  install -m 755 "$QUELLE/install/truhenblick-anmeldung-aus" /usr/local/bin/truhenblick-anmeldung-aus
+  ln -sf /usr/local/bin/truhenblick-anmeldung-aus /usr/bin/truhenblick-anmeldung-aus
 }
 
 adresse() {
@@ -458,6 +617,8 @@ SYNC_TOKEN_AKTUELL=""
 pakete_installieren
 quellen_holen
 app_bauen
+# Vor dem Backend: Eine Adresse aus einer früheren Caddy-Datei soll es beim Start schon kennen.
+caddy_altlast_pruefen
 if [[ "$TB_SYNC" == "1" ]]; then backend_einrichten; else backend_entfernen; fi
 caddy_einrichten
 einstellungen_merken
@@ -481,5 +642,9 @@ if [[ "$TB_SYNC" == "1" ]]; then
   fi
 else
   printf '  Abgleich:  nicht installiert\n'
+fi
+if [[ "$TB_SYNC" == "1" ]]; then
+  printf '  Server:    Adresse, Reverse Proxy und Passwort stellst du in der App ein\n'
+  printf '             (Einstellungen → Server)\n'
 fi
 printf '  Update:    truhenblick-update\n'

@@ -8,6 +8,7 @@ import { UpdateHinweis } from './components/UpdateHinweis.tsx';
 import { DatenProvider, useDaten, useGeladeneDaten } from './hooks/useDaten.tsx';
 import { gehe, useRoute, type Reiter, type Route } from './hooks/useRoute.ts';
 import { statusVon } from './logic/haltbarkeit.ts';
+import { Anmeldung } from './pages/Anmeldung.tsx';
 import { ArtikelFormular } from './pages/ArtikelFormular.tsx';
 import { BaldPage } from './pages/BaldPage.tsx';
 import { BereichDetail } from './pages/BereichDetail.tsx';
@@ -15,6 +16,7 @@ import { Einrichtung } from './pages/Einrichtung.tsx';
 import { Einstellungen } from './pages/Einstellungen.tsx';
 import { ListePage } from './pages/ListePage.tsx';
 import { TruhePage } from './pages/TruhePage.tsx';
+import { starteAnmeldung, useAnmeldung } from './sync/anmeldung.ts';
 import { starteAutoSync } from './sync/auto.ts';
 
 function istReiter(route: Route): route is { seite: Reiter } {
@@ -24,6 +26,8 @@ function istReiter(route: Route): route is { seite: Reiter } {
 export function App() {
   // Abgleich mit dem Sync-Server – tut nichts, solange keiner eingerichtet ist.
   useEffect(() => starteAutoSync(), []);
+  // Verlangt der Server ein Passwort?
+  useEffect(() => starteAnmeldung(), []);
 
   return (
     <>
@@ -35,10 +39,16 @@ export function App() {
 
 function Inhalt() {
   const daten = useGeladeneDaten();
+  const anmeldung = useAnmeldung();
 
   // IndexedDB antwortet in Millisekunden – bis dahin bleibt der Hintergrund stehen, ohne Ladeanzeige.
   if (!daten) return null;
-  if (daten.bereiche.length === 0) return <Einrichtung />;
+  // Der Server verlangt ein Passwort: erst anmelden. (Antwortet er gar nicht, bleibt die App benutzbar.)
+  if (anmeldung.stand === 'noetig') return <Anmeldung />;
+  if (daten.bereiche.length === 0) {
+    // Erst die Auskunft des Servers abwarten – sonst blitzt der Assistent vor der Loginmaske auf.
+    return anmeldung.geprueft ? <Einrichtung /> : null;
+  }
 
   return (
     <DatenProvider daten={daten}>

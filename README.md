@@ -13,9 +13,11 @@ Hängekörbe, Ebenen und Fächer als Kacheln, darin die Artikel als farbige Chip
 - Rückgängig nach Entnehmen und Ändern, JSON-Backup, Dark Mode nach Systemeinstellung
 - Optional: eigener Sync-Server – beim Anlegen einer Truhe entsteht ein Code, mit dem weitere Geräte beitreten
 - Optional: Anbindung an Home Assistant – das Dashboard zeigt, was bald abläuft
+- Optional: Anmeldung mit Passwort, wenn der Server aus dem Internet erreichbar ist
 
 **Inhalt:** [Lokal starten](#lokal-starten) · [Anpassen](#anpassen) · [Installation](#installation) ·
-[HTTPS und Reverse Proxy](#https-und-reverse-proxy) · [Updates](#updates) ·
+[HTTPS und Reverse Proxy](#https-und-reverse-proxy) · [Anmeldung mit Passwort](#anmeldung-mit-passwort) ·
+[Updates](#updates) ·
 [Backup und Restore](#backup-und-restore) · [Abgleich zwischen Geräten](#abgleich-zwischen-geräten) ·
 [Home Assistant](#home-assistant) · [PWA testen](#pwa-testen) · [Tests](#tests) ·
 [Stand der Prüfungen](#stand-der-prüfungen)
@@ -235,13 +237,14 @@ hat.
 | Pfad | Inhalt |
 | --- | --- |
 | `/var/www/truhenblick` | die gebaute Web-App |
-| `/etc/caddy/Caddyfile` | Webserver-Konfiguration |
+| `/etc/caddy/Caddyfile` | Webserver-Konfiguration – enthält keine Adresse, die wird in der App eingestellt |
 | `/opt/truhenblick/src` | Quellen (Git-Checkout) |
 | `/opt/truhenblick/app` | laufendes Sync-Backend |
 | `/var/lib/truhenblick/truhenblick.sqlite` | **Datenbank des Sync-Backends** |
 | `/var/lib/truhenblick/backups/` | automatische Sicherungen vor Updates |
 | `/etc/truhenblick/server.env` | Einstellungen des Backends (z. B. `NEUE_TRUHEN`) |
 | `/usr/local/bin/truhenblick-update` | Update-Skript |
+| `/usr/local/bin/truhenblick-anmeldung-aus` | schaltet die Anmeldung ab, wenn niemand mehr das Passwort kennt |
 | `/var/lib/truhenblick-update/` | Stand und Protokoll des letzten Updates aus der App |
 
 Dienste: `systemctl status caddy` und `systemctl status truhenblick-server`, Meldungen mit
@@ -263,8 +266,9 @@ docker compose --profile sync up -d --build
 
 Die App ist danach unter `http://<Rechner>:<HTTP_PORT>` erreichbar (Standard: Port 80).
 
-- **Konfiguration** vollständig über Umgebungsvariablen in `.env` – siehe die Kommentare in
-  [`.env.example`](.env.example).
+- **Konfiguration:** Ports und Grenzen über Umgebungsvariablen in `.env` – siehe die Kommentare in
+  [`.env.example`](.env.example). Adresse, Reverse Proxy und Passwort werden in der App eingestellt
+  (*Einstellungen → Server*).
 - **Daten:** Die SQLite-Datenbank des Backends liegt im Volume `truhenblick_daten`.
 - **ARM64 / Raspberry Pi:** Die Images bauen direkt auf dem Gerät (64-Bit-System vorausgesetzt). Die App wird in
   der Build-Stufe erzeugt und von `caddy:2-alpine` ausgeliefert; das Backend nutzt `node:24-alpine` und bringt
@@ -302,39 +306,123 @@ Zu beachten:
 
 Browser erlauben Service Worker – und damit Installation und Offline-Betrieb – nur über HTTPS.
 
-**Variante 1: Reverse Proxy davor** (z. B. Caddy auf dem VPS, Nginx Proxy Manager, Traefik). Truhenblick lauscht
-nur intern, der Proxy kümmert sich um das Zertifikat. Mit Docker Compose in der `.env`:
+**Unter welcher Adresse der Server erreichbar ist, stellst du in der App ein:** *Einstellungen → Server →
+Erreichbarkeit*. Am Server selbst – Caddy-Datei, `.env` – ist dafür nichts zu ändern. Truhenblick antwortet
+auf Port 80 unter jedem Namen, über die IP im Heimnetz genauso wie über den Namen aus dem Proxy.
+
+| Einstellung | wann |
+| --- | --- |
+| **Nur im Heimnetz** (Standard) | `http://<IP>` – zum Ausprobieren; installieren lässt sich die App so nicht |
+| **Über einen Reverse Proxy mit HTTPS** | Nginx Proxy Manager, Traefik, Caddy, Cloudflare-Tunnel … kümmern sich um das Zertifikat |
+| **Truhenblick holt das Zertifikat selbst** | ohne Proxy: Die Adresse zeigt direkt auf den Server, Ports 80 und 443 sind aus dem Internet erreichbar |
+
+Ändern können das die Geräte der Truhe, die auf dem Server zuerst angelegt wurde. *Adresse prüfen* zeigt danach,
+ob unter `https://<Adresse>` wirklich dieser Server antwortet.
+
+> **Hinweis für Installationen bis Version 0.4:** Die frühere Anleitung, in `/etc/caddy/Caddyfile` die Zeile
+> `:80 {` durch die eigene Adresse zu ersetzen, ist überholt – hinter einem Reverse Proxy führte sie in eine
+> Umleitungsschleife. `truhenblick-update` erkennt so eine Datei, schreibt sie neu (die alte bleibt als
+> `Caddyfile.vor-0.5` liegen) und übernimmt die Adresse in die Einstellungen der App. Bei Docker gehört
+> `SITE_ADDRESS` nicht mehr in die `.env`.
+
+### Nginx Proxy Manager
+
+1. In NPM einen **Proxy Host** anlegen:
+
+   | Feld | Wert |
+   | --- | --- |
+   | Domain Names | `truhe.example.de` |
+   | Scheme | `http` (nicht https) |
+   | Forward Hostname / IP | IP des Truhenblick-Servers, z. B. `192.168.1.50` |
+   | Forward Port | `80` (bei Docker der Wert von `HTTP_PORT`) |
+   | Websockets Support | nicht nötig |
+   | Block Common Exploits, Cache Assets | beides möglich |
+   | SSL | Zertifikat anfordern, *Force SSL* und *HTTP/2* einschalten |
+
+2. In Truhenblick – am einfachsten noch über `http://<IP>` –: *Einstellungen → Server → Über einen Reverse
+   Proxy mit HTTPS*, die Adresse eintragen, speichern, *Adresse prüfen*.
+3. Die App künftig unter `https://truhe.example.de` öffnen und dort installieren.
+
+Dazu drei Dinge, die gern übersehen werden:
+
+- **Jede Adresse ist für den Browser eine eigene App.** Was ein Gerät unter `http://<IP>` angelegt hat, sieht es
+  unter `https://truhe.example.de` zunächst nicht. Dort einmal *Einer Truhe beitreten* und den Code eingeben –
+  die Daten kommen vom Server.
+- **Die Einstellung „Reverse Proxy“ ist mehr als ein Etikett:** Erst damit rechnet der Server Fehlversuche dem
+  einzelnen Gerät zu. Ohne sie sieht er alle Geräte unter der Adresse des Proxys, und zehn falsche Codes eines
+  Geräts sperren zehn Minuten lang alle.
+- **Aus dem Internet erreichbar?** Dann ein [Passwort festlegen](#anmeldung-mit-passwort).
+
+Andere Proxys brauchen dasselbe: Weiterleitung per HTTP an Port 80 des Servers, der ursprüngliche `Host` bleibt
+erhalten, `X-Forwarded-For` und `X-Forwarded-Proto` werden gesetzt. Für Caddy auf einem vorgeschalteten
+Rechner steht ein Beispiel in [`deploy/Caddyfile.example`](deploy/Caddyfile.example).
+
+Mit Docker Compose auf demselben Rechner wie der Proxy lauscht Truhenblick am besten nur lokal – in der `.env`:
 
 ```ini
 HTTP_BIND=127.0.0.1
 HTTP_PORT=8080
 ```
 
-und in der Caddy-Konfiguration des Hosts (vollständiges Beispiel: [`deploy/Caddyfile.example`](deploy/Caddyfile.example)):
+### Truhenblick holt das Zertifikat selbst
 
-```caddyfile
-truhe.example.de {
-	reverse_proxy 127.0.0.1:8080
-}
-```
+Voraussetzung: Die Adresse zeigt per DNS auf den Server, die Ports 80 und 443 sind aus dem Internet erreichbar,
+und das Sync-Backend läuft (es entscheidet, für welchen Namen ein Zertifikat geholt wird).
 
-Für einen Proxmox-Container zeigt der Proxy stattdessen auf dessen Adresse, z. B. `reverse_proxy 192.168.1.50:80`.
-
-**Variante 2: Truhenblick holt das Zertifikat selbst.** Voraussetzung: Die Domain zeigt auf den Rechner, Ports 80
-und 443 sind aus dem Internet erreichbar.
-
-- Docker Compose: in der `.env` `SITE_ADDRESS=truhe.example.de` setzen und mit der Zusatzdatei starten:
+- **Proxmox-LXC, ohne Container:** In der App *Truhenblick holt das Zertifikat selbst* wählen und die Adresse
+  eintragen – mehr nicht. Port 443 hält die Installation dafür schon bereit.
+- **Docker Compose:** zusätzlich Port 443 freigeben, also mit der Zusatzdatei starten:
 
   ```bash
   docker compose -f docker-compose.yml -f docker-compose.https.yml --profile sync up -d --build
   ```
 
-- Proxmox-LXC: im Container in `/etc/caddy/Caddyfile` die Zeile `:80 {` durch `truhe.example.de {` ersetzen,
-  die erste Zeile der Datei (die Markierung „automatisch erzeugt“) löschen, damit Updates sie nicht
-  überschreiben, und `systemctl reload caddy` ausführen.
+Das Zertifikat (Let's Encrypt) holt der Server, sobald die Adresse zum ersten Mal über `https://` aufgerufen
+wird; das dauert beim ersten Mal ein paar Sekunden. Für jeden anderen Namen lehnt er ab. Wer die App danach
+über `http://<Adresse>` öffnet, wird auf `https://` umgeleitet; über die IP bleibt sie per `http://`
+erreichbar – so kommt man auch dann heran, wenn mit dem Zertifikat etwas nicht stimmt.
 
-Im Heimnetz ohne öffentliche Domain hilft ein Reverse Proxy mit eigenem Zertifikat (z. B. per DNS-Challenge) oder
-ein Dienst wie Tailscale mit HTTPS-Zertifikaten.
+Im Heimnetz ohne öffentliche Adresse hilft ein Reverse Proxy mit eigenem Zertifikat (z. B. per DNS-Challenge)
+oder ein Dienst wie Tailscale mit HTTPS-Zertifikaten.
+
+**Ohne Sync-Backend** gibt es keine Einstellungen in der App. Dann übernimmt ein vorgeschalteter Proxy das
+Zertifikat, oder die Caddy-Datei wird von Hand gepflegt (erste Zeile löschen, damit Updates sie in Ruhe lassen).
+
+## Anmeldung mit Passwort
+
+Ohne Passwort kann jeder, der die Adresse kennt, die App öffnen und eine eigene, leere Truhe anlegen – an eure
+Truhe kommt er trotzdem nur mit ihrem Code. Für einen Server, der aus dem Internet erreichbar ist, empfiehlt sich
+zusätzlich die Anmeldung:
+
+1. *Einstellungen → Server → Anmeldung*: Passwort eintragen (mindestens acht Zeichen), *Anmeldung einschalten*.
+2. Jedes andere Gerät zeigt beim nächsten Öffnen die Loginmaske und bleibt nach der Anmeldung angemeldet.
+
+- **Was geschützt ist:** der Server. Ohne Anmeldung beantwortet er nur noch die Frage, ob eine Anmeldung nötig
+  ist – kein Abgleich, keine neue Truhe, keine Einstellungen, auch nicht mit dem richtigen Code.
+- **Was nicht:** Die App selbst lädt weiterhin jeder (sie enthält keine Daten), und was schon auf einem Gerät
+  gespeichert ist, bleibt dort lesbar – auch offline. Die Anmeldung ist kein Geräteschutz.
+- **Wie lange:** Ein Gerät bleibt angemeldet, solange es die App mindestens alle 90 Tage benutzt. *Abmelden*
+  meldet das eigene Gerät ab, *Alle anderen Geräte abmelden* den Rest; eine Passwortänderung meldet alle
+  anderen ab.
+- **Durchprobieren:** Nach zehn falschen Passwörtern ist eine Adresse zehn Minuten gesperrt, nach dreißig von
+  beliebigen Adressen die Anmeldung insgesamt. Angemeldete Geräte merken davon nichts.
+- **Home Assistant** fragt weiter mit seinem Lese-Schlüssel ab und braucht kein Passwort.
+- **Gespeichert** ist auf dem Server nur eine Prüfsumme des Passworts (scrypt).
+- **Wer darf das einstellen?** Die Geräte der zuerst angelegten Truhe. Richte den Server deshalb ein und lege
+  das Passwort fest, **bevor** du ihn aus dem Internet erreichbar machst.
+
+**Passwort vergessen und kein Gerät mehr angemeldet?** Auf dem Server:
+
+```bash
+# Proxmox-LXC / ohne Container (vom Proxmox-Host: pct exec <ID> -- truhenblick-anmeldung-aus)
+truhenblick-anmeldung-aus
+
+# Docker Compose
+docker compose exec api node server/src/index.ts --anmeldung-aus
+```
+
+Danach ist die Anmeldung abgeschaltet; ein neues Passwort legst du wieder in der App fest. Truhen, Daten und
+Codes bleiben unberührt.
 
 ## Updates
 
@@ -447,22 +535,26 @@ Mehr ist nicht nötig; auf dem Server muss dafür nichts eingestellt werden.
 - **Konflikte:** Ändern zwei Geräte denselben Artikel, gewinnt die **spätere Änderung** (Zeitstempel
   `geaendertAm`). Das gilt für den ganzen Artikel, nicht feldweise. Die Uhren der Geräte sollten deshalb
   ungefähr stimmen.
-- **Schnittstelle:** `GET /api/health` und `POST /api/truhen` ohne Anmeldung; mit dem Code als
+- **Schnittstelle:** `GET /api/health` und `POST /api/truhen` ohne Code; mit dem Code als
   `Authorization: Bearer …`: `POST /api/sync`, `POST /api/code`, `GET`/`POST /api/update`,
-  `GET`/`POST`/`DELETE /api/lesezugang`. `GET /api/uebersicht` geht auch mit dem Lese-Schlüssel
-  (siehe [Home Assistant](#home-assistant)).
+  `GET`/`POST`/`DELETE /api/lesezugang`, `GET`/`POST /api/server`, `POST /api/passwort`,
+  `DELETE /api/sitzungen`. `GET /api/uebersicht` geht auch mit dem Lese-Schlüssel
+  (siehe [Home Assistant](#home-assistant)). Verlangt der Server ein Passwort, braucht alles außer
+  `/api/health`, `/api/anmelden` und `/api/uebersicht` zusätzlich die Kennung der Anmeldung
+  (`X-Truhenblick-Sitzung`, von `POST /api/anmelden`).
 
 ### Wer darf was?
 
 - **Eine neue Truhe anlegen** kann jeder, der den Server erreicht – ohne Anmeldung, denn sonst bräuchte man
   schon vor der ersten Truhe einen Code. An eine *vorhandene* Truhe kommt man nur mit ihrem Code.
   Begrenzt ist das auf zehn Truhen je Server und fünf neue pro Stunde und Adresse.
-  **Für Server, die aus dem Internet erreichbar sind:** nach dem Anlegen der eigenen Truhe `NEUE_TRUHEN=aus`
-  setzen (siehe unten).
+  **Für Server, die aus dem Internet erreichbar sind:** ein [Passwort festlegen](#anmeldung-mit-passwort) –
+  dann geht ohne Anmeldung gar nichts mehr – oder nach dem Anlegen der eigenen Truhe `NEUE_TRUHEN=aus` setzen
+  (siehe unten).
 - **Einer Truhe beitreten, sie lesen und ändern, ihren Code erneuern:** jedes Gerät mit ihrem Code. Nach zehn
   falschen Codes ist eine Adresse zehn Minuten gesperrt. Der Code gehört nur über HTTPS ins Internet.
-- **Den Server aus der App aktualisieren:** nur die Geräte der **zuerst angelegten** Truhe – sonst könnte
-  jeder mit einer eigenen Truhe Updates auslösen.
+- **Den Server aus der App aktualisieren, seine Adresse und das Passwort einstellen:** nur die Geräte der
+  **zuerst angelegten** Truhe – sonst könnte jeder mit einer eigenen Truhe Updates auslösen oder alle aussperren.
 
 ### Einstellungen des Backends
 
@@ -478,6 +570,7 @@ Umgebungsvariablen – im Proxmox-Container in `/etc/truhenblick/server.env` (da
 | `HOST` | `0.0.0.0` | Adresse, auf der gelauscht wird |
 | `DATA_DIR` | `./data` | Verzeichnis der SQLite-Datenbank |
 | `CORS_ORIGIN` | – | nur nötig, wenn die App von einer anderen Adresse geladen wird als das Backend |
+| `START_ADRESSE`, `START_ERREICHBARKEIT` | – | Startwerte für *Einstellungen → Server* (`heimnetz`, `proxy` oder `selbst`); sie gelten nur, solange in der App noch nichts eingestellt wurde |
 
 **Kennt kein Gerät mehr den Code der ersten Truhe**, setzt du ihn von der Serverseite zurück: bei `SYNC_TOKEN`
 einen **neuen** Wert eintragen und den Dienst neu starten. Ein geänderter `SYNC_TOKEN` hat Vorrang vor einem
@@ -684,13 +777,13 @@ npm run preview        # http://localhost:4173 – localhost gilt als sichere He
 
 | Was | Befehl | Umfang |
 | --- | --- | --- |
-| Datenlogik der App | `npm test` | Datum und Haltbarkeit, Vorschläge, Suche, Truhenstruktur, Konfliktregel, Datenbankoperationen, Backup, Sync-Client, Übersicht und Konfiguration für Home Assistant |
-| Sync-Backend | `cd server && npm test` | Anmeldung, Eingabeprüfung, Abgleich und Konflikte, Lese-Schlüssel und Übersicht gegen eine SQLite-Datenbank im Speicher |
+| Datenlogik der App | `npm test` | Datum und Haltbarkeit, Vorschläge, Suche, Truhenstruktur, Konfliktregel, Datenbankoperationen, Backup, Sync-Client, Anmeldung, Übersicht und Konfiguration für Home Assistant |
+| Sync-Backend | `cd server && npm test` | Zugangscodes, Eingabeprüfung, Abgleich und Konflikte, Lese-Schlüssel und Übersicht, Anmeldung mit Passwort, Adresse und Erreichbarkeit, Sperren hinter einem Reverse Proxy – gegen eine SQLite-Datenbank im Speicher |
 | Proxmox-Skript | `npm run test:install` | Optionen, Rückfragen, Prüfungen und Aufräumen nach Fehlern – mit nachgebildeten Proxmox-Befehlen |
 
 ## Stand der Prüfungen
 
-Was bisher wie geprüft wurde (Stand: Version 0.4.0):
+Was bisher wie geprüft wurde (Stand: Version 0.5.0):
 
 - **App:** automatisierte Tests sowie Durchläufe im Browser (Chrome, Handy- und Desktop-Breite, hell und dunkel)
   einschließlich Offline-Betrieb und Update-Hinweis am Produktions-Build.
@@ -720,9 +813,28 @@ Was bisher wie geprüft wurde (Stand: Version 0.4.0):
   „nicht verfügbar“ und erholten sich danach von selbst (dafür mit 15 Sekunden statt zehn Minuten Abstand
   zwischen den Abfragen). **Nicht** geprüft: die Karte in einem echten Dashboard (nur ihre Vorlage), das
   Beispiel für die Erinnerung und Home Assistant OS mit einem Truhenblick im Proxmox-Container.
-- **Docker:** beide Images gebaut und als Compose-Stack gestartet (nur App, mit Sync-Backend, mit eigenem HTTPS
-  über `SITE_ADDRESS`), Daten überstehen einen Neustart. ARM64 wurde unter Emulation gebaut und gestartet,
-  **nicht** auf einem echten Raspberry Pi. Das Abholen eines echten Zertifikats (Let's Encrypt) ist ungetestet.
+- **Hinter Nginx Proxy Manager:** mit dem echten NPM-Image geprüft – der Proxy-Host nach dessen eigener
+  Vorlage, alle Schalter an (Cache Assets, Block Common Exploits, Force SSL, HTTP/2, HSTS), dahinter der
+  Docker-Stack. Drei Browser: Truhe anlegen, beitreten, Abgleich in beide Richtungen, Service Worker aktiv.
+  Nachgestellt wurde auch der frühere Fehler (Adresse in der Caddy-Datei → Umleitungsschleife). Der Proxy-Host
+  wurde dabei als Datei angelegt, nicht über die Oberfläche von NPM; das Zertifikat war selbst ausgestellt.
+  **Nicht** geprüft: Traefik, Cloudflare-Tunnel und andere Proxys.
+- **Adresse, Erreichbarkeit und Anmeldung:** im Browser durchgespielt – ein Gerät direkt am Server, zwei über
+  NPM: Adresse einstellen und prüfen, Passwort festlegen, Loginmaske mit falschem und richtigem Passwort,
+  beitreten und abgleichen, andere Geräte abmelden, Passwort ändern, abmelden, Anmeldung abschalten, offline
+  weiterarbeiten. Dass Sperren hinter NPM nur das einzelne Gerät treffen, wurde über die Schnittstelle geprüft.
+- **Zertifikat selbst holen:** mit einer lokalen Test-Zertifizierungsstelle (Pebble, die Testfassung von Let's
+  Encrypt) und echten ACME-Prüfungen, jeweils mit Caddy 2.11 (Docker-Image) und Caddy 2.6.2 (Debian 12, wie im
+  Proxmox-Container): Ein Zertifikat gibt es nur bei „selbst“ und nur für die eingestellte Adresse; Port 80
+  bleibt ohne Umleitung erreichbar. **Nicht** geprüft: das Abholen eines echten Zertifikats von Let's Encrypt
+  und die Umleitung der App von `http://` auf `https://` im Browser (nur ihre Entscheidungslogik).
+- **Update von 0.4 auf 0.5 im Proxmox-Container:** gelaufen mit einer nach der alten Anleitung von Hand
+  geänderten Caddy-Datei – sie wurde erkannt, neu geschrieben und die Adresse übernommen; die Truhe blieb
+  erhalten. `truhenblick-anmeldung-aus` lief dort nur ohne gesetztes Passwort (mit Passwort: im Docker-Stack).
+- **Docker:** beide Images gebaut und als Compose-Stack gestartet (nur App, mit Sync-Backend, mit der
+  Zusatzdatei für Port 443 – auch mit einer alten `.env`, aus der `SITE_ADDRESS` übernommen wird), Daten
+  überstehen einen Neustart. `--anmeldung-aus` lief dort mit gesetztem Passwort. ARM64 wurde unter Emulation
+  gebaut und gestartet (zuletzt mit Version 0.4), **nicht** auf einem echten Raspberry Pi.
 - **Ohne Container** (`container-setup.sh` direkt auf einem Server): nur im Proxmox-Container gelaufen,
   nicht auf Ubuntu.
 - **iOS und Android:** noch nicht auf echten Geräten ausprobiert. Eigene iOS-Startbilder (Splash-Images) gibt es

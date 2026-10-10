@@ -30,6 +30,22 @@ function start(): void {
   mkdirSync(konfig.datenVerzeichnis, { recursive: true });
   const datei = join(konfig.datenVerzeichnis, 'truhenblick.sqlite');
   const speicher = oeffneSpeicher(datei);
+
+  // Notausgang, wenn niemand mehr das Passwort kennt:  node server/src/index.ts --anmeldung-aus
+  // Das geht auch, während der Server läuft – er liest die Einstellung bei jeder Anfrage neu.
+  if (process.argv.includes('--anmeldung-aus')) {
+    const war = speicher.einstellung('passwort') !== null;
+    speicher.einstellungSetzen('passwort', null);
+    speicher.sitzungenBeenden();
+    speicher.schliessen();
+    console.log(
+      war
+        ? 'Die Anmeldung ist abgeschaltet. Ein neues Passwort lässt sich in der App festlegen (Einstellungen → Server).'
+        : 'Auf diesem Server war keine Anmeldung eingerichtet.',
+    );
+    return;
+  }
+
   const app = erstelleApp({
     speicher,
     token: konfig.token,
@@ -38,6 +54,8 @@ function start(): void {
     corsOrigins: konfig.corsOrigins,
     version: version(),
     update: erstelleUpdateDienst(STANDARD_ORTE(konfig.datenVerzeichnis)),
+    startAdresse: konfig.startAdresse,
+    startErreichbarkeit: konfig.startErreichbarkeit,
   });
 
   const server = serve({ fetch: app.fetch, port: konfig.port, hostname: konfig.host }, (info) => {
@@ -45,6 +63,9 @@ function start(): void {
     console.log(`Truhenblick-Server ${version()} lauscht auf ${info.address}:${info.port}`);
     console.log(`Datenbank: ${datei} (${stand.truhen} Truhen, ${stand.datensaetze} Datensätze)`);
     console.log(`Neue Truhen anlegen: ${konfig.neueTruhen ? `an (höchstens ${konfig.maxTruhen})` : 'aus'}`);
+    const art = speicher.einstellung('erreichbarkeit') ?? 'heimnetz';
+    console.log(`Erreichbarkeit: ${art}${art === 'heimnetz' ? '' : ` (${speicher.einstellung('adresse') ?? '?'})`}`);
+    console.log(`Anmeldung mit Passwort: ${speicher.einstellung('passwort') ? 'an' : 'aus'}`);
   });
 
   let beendet = false;

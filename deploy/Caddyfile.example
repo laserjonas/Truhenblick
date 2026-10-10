@@ -1,12 +1,16 @@
-# Beispiel für einen Reverse Proxy mit HTTPS vor Truhenblick (Caddy auf dem Host, z. B. Ubuntu-VPS).
+# Beispiel für einen Reverse Proxy mit HTTPS vor Truhenblick: Caddy auf einem vorgeschalteten
+# Rechner (z. B. Ubuntu-VPS oder derselbe Host, auf dem Docker läuft).
 #
 # Voraussetzungen:
-#   - Die Domain zeigt per DNS auf diesen Server, Ports 80 und 443 sind offen.
-#   - Truhenblick lauscht lokal, z. B. mit HTTP_BIND=127.0.0.1 und HTTP_PORT=8080 in der .env
-#     (Docker Compose) oder als LXC unter http://<IP-des-Containers>:80.
+#   - Die Adresse zeigt per DNS auf diesen Rechner, Ports 80 und 443 sind offen.
+#   - Truhenblick lauscht per HTTP, z. B. mit HTTP_BIND=127.0.0.1 und HTTP_PORT=8080 in der .env
+#     (Docker Compose) oder als Proxmox-LXC unter http://<IP-des-Containers>:80.
+#   - In Truhenblick ist eingestellt: Einstellungen → Server → „Über einen Reverse Proxy mit HTTPS“
+#     mit dieser Adresse. An Truhenblicks eigener Caddy-Datei wird nichts geändert.
 #
 # Einbinden:  Inhalt nach /etc/caddy/Caddyfile übernehmen, dann  sudo systemctl reload caddy
-# Caddy besorgt und erneuert das Zertifikat von Let's Encrypt automatisch.
+# Caddy besorgt und erneuert das Zertifikat von Let's Encrypt automatisch und reicht die Adresse
+# des Geräts (X-Forwarded-For) sowie den ursprünglichen Namen (Host) von sich aus weiter.
 
 truhe.example.de {
 	encode zstd gzip
@@ -18,22 +22,6 @@ truhe.example.de {
 	# reverse_proxy 192.168.1.50:80
 }
 
-# ---------------------------------------------------------------------------
-# Variante ohne Docker: App als statische Dateien, Backend als systemd-Dienst
-# (so richtet es auch das Proxmox-Skript im Container ein).
-#
-# truhe.example.de {
-# 	encode zstd gzip
-#
-# 	handle /api/* {
-# 		reverse_proxy 127.0.0.1:3000
-# 	}
-#
-# 	handle {
-# 		root * /var/www/truhenblick
-# 		@frisch path / /index.html /sw.js /registerSW.js /manifest.webmanifest
-# 		header @frisch Cache-Control "no-cache"
-# 		try_files {path} /index.html
-# 		file_server
-# 	}
-# }
+# Für Nginx Proxy Manager steht die Einrichtung Schritt für Schritt in der README
+# (Abschnitt „HTTPS und Reverse Proxy“). Ohne vorgeschalteten Proxy braucht es keine solche Datei:
+# Dann holt Truhenblick das Zertifikat selbst, sobald das in der App eingestellt ist.

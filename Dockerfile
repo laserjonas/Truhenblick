@@ -21,11 +21,8 @@ FROM caddy:2-alpine
 COPY docker/Caddyfile /etc/caddy/Caddyfile
 COPY --from=build /app/dist /srv
 
-# SITE_ADDRESS: „:80“ (Standard, hinter eigenem Reverse Proxy) oder eine Domain –
-#               dann besorgt Caddy selbst ein HTTPS-Zertifikat.
-# API_UPSTREAM: Adresse des Sync-Backends für /api/*
-ENV SITE_ADDRESS=:80 \
-    API_UPSTREAM=api:3000
+# API_UPSTREAM: Adresse des Sync-Backends für /api/* (und für die Rückfrage vor einem Zertifikat)
+ENV API_UPSTREAM=api:3000
 
 EXPOSE 80 443
 # Caddys Verwaltungsschnittstelle ist nur im Container erreichbar und antwortet, solange Caddy läuft.

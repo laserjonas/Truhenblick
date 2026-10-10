@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '../db/db.ts';
 import { bereichAnlegen } from '../db/repo.ts';
-import { CODE_HINWEIS, entferneKonfig, ladeKonfig, legeTruheAn, merkeCodeHinweis, pruefeServer, speichereKonfig, SyncFehler } from './client.ts';
+import { CODE_HINWEIS, entferneKonfig, ladeKonfig, legeTruheAn, merkeCodeHinweis, NICHT_DA, pruefeServer, speichereKonfig, SyncFehler } from './client.ts';
 
 type Antwort = { status: number; body: unknown } | 'netzfehler';
 
@@ -27,12 +27,12 @@ afterEach(() => vi.unstubAllGlobals());
 describe('pruefeServer', () => {
   it('erkennt einen Truhenblick-Server und ob er neue Truhen annimmt', async () => {
     stelleServer({ '/api/health': { status: 200, body: { ok: true, app: 'truhenblick', version: '0.3.0', neueTruhen: true } } });
-    expect(await pruefeServer('')).toEqual({ da: true, neueTruhen: true });
+    expect(await pruefeServer('')).toMatchObject({ da: true, neueTruhen: true });
   });
 
   it('hält einen älteren Server für vorhanden, aber ohne neue Truhen', async () => {
     stelleServer({ 'https://alt.example/api/health': { status: 200, body: { ok: true, app: 'truhenblick', version: '0.2.1' } } });
-    expect(await pruefeServer('https://alt.example')).toEqual({ da: true, neueTruhen: false });
+    expect(await pruefeServer('https://alt.example')).toMatchObject({ da: true, neueTruhen: false, anmeldung: false, angemeldet: true });
   });
 
   it('meldet „nicht da“ bei fremden Antworten, Fehlern und ohne Netz – ohne zu werfen', async () => {
@@ -40,9 +40,9 @@ describe('pruefeServer', () => {
       '/api/health': { status: 200, body: { hallo: 'welt' } },
       'https://kaputt.example/api/health': { status: 502, body: {} },
     });
-    expect(await pruefeServer('')).toEqual({ da: false, neueTruhen: false });
-    expect(await pruefeServer('https://kaputt.example')).toEqual({ da: false, neueTruhen: false });
-    expect(await pruefeServer('https://weg.example')).toEqual({ da: false, neueTruhen: false });
+    expect(await pruefeServer('')).toEqual(NICHT_DA);
+    expect(await pruefeServer('https://kaputt.example')).toEqual(NICHT_DA);
+    expect(await pruefeServer('https://weg.example')).toEqual(NICHT_DA);
   });
 });
 

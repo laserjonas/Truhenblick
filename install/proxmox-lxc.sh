@@ -750,11 +750,12 @@ cat <<EOF
   ${FETT}${GELB}Wichtig: Für die Installation als App ist HTTPS nötig.${AUS}
   Über http:// läuft Truhenblick im Browser, lässt sich aber nicht auf dem
   Home-Bildschirm installieren und nicht offline nutzen. Zwei Wege:
-    • Reverse Proxy mit Zertifikat davor (Caddy, Nginx Proxy Manager, Traefik …),
-      der auf ${URL} weiterleitet
-    • Im Container in /etc/caddy/Caddyfile die Zeile „:${PORT}“ durch die eigene
-      Domain ersetzen – Caddy holt sich das Zertifikat dann selbst
-      (Ports 80 und 443 müssen aus dem Internet erreichbar sein)
-  Beispiele: https://github.com/laserjonas/Truhenblick#https-und-reverse-proxy
+    • Reverse Proxy mit Zertifikat davor (Nginx Proxy Manager, Caddy, Traefik …),
+      der auf ${URL} weiterleitet (Schema http)
+    • Truhenblick holt das Zertifikat selbst (die Adresse zeigt auf diesen
+      Container, Ports 80 und 443 sind aus dem Internet erreichbar)
+  Beides wird in der App eingestellt, ebenso ein Passwort für die Anmeldung:
+  Einstellungen → Server. Am Container ist dafür nichts zu ändern.
+  Mehr dazu: https://github.com/laserjonas/Truhenblick#https-und-reverse-proxy
 
 EOF

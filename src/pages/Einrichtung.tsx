@@ -188,7 +188,12 @@ function Beitreten({ server, verbunden, zuNeu }: { server: ServerInfo | null; ve
       // Hat die Truhe schon einen Aufbau, erscheint sie nach dem Abgleich von selbst.
       await verbinde({ url: ziel === window.location.origin ? '' : ziel, token: code });
     } catch (e) {
-      setFehler(e instanceof SyncFehler ? e.message : 'Der Beitritt ist fehlgeschlagen.');
+      if (e instanceof SyncFehler && e.art === 'anmeldung' && ziel && ziel !== window.location.origin) {
+        // Die Loginmaske gehört zum Server, von dem die App geladen wurde – nicht zu einem fremden.
+        setFehler(`Dieser Server verlangt eine Anmeldung. Öffne die App direkt unter ${ziel} und melde dich dort an.`);
+      } else {
+        setFehler(e instanceof SyncFehler ? e.message : 'Der Beitritt ist fehlgeschlagen.');
+      }
     } finally {
       setLaeuft(false);
     }

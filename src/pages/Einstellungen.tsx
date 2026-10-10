@@ -1,9 +1,11 @@
 import type { ReactNode } from 'react';
 import { IosAnleitung } from '../components/InstallHinweis.tsx';
 import { installiere, useInstallation } from '../hooks/useInstallation.ts';
+import { useAnmeldung } from '../sync/anmeldung.ts';
 import { Aktualisierung } from './Aktualisierung.tsx';
 import { Datensicherung } from './Datensicherung.tsx';
 import { HomeAssistant } from './HomeAssistant.tsx';
+import { ServerEinstellungen } from './ServerEinstellungen.tsx';
 import { SyncEinstellungen } from './SyncEinstellungen.tsx';
 import { TruheBearbeiten } from './TruheBearbeiten.tsx';
 
@@ -19,6 +21,8 @@ export function Abschnitt({ titel, hinweis, children }: { titel: string; hinweis
 
 function AppInstallieren() {
   const { installiert, angebot, ios, sicher } = useInstallation();
+  // Die in der App eingestellte Adresse des Servers (Einstellungen → Server), falls es eine gibt
+  const adresse = useAnmeldung().server?.adresse ?? null;
 
   if (installiert) return <p>✓ Truhenblick ist auf diesem Gerät installiert.</p>;
   if (angebot) {
@@ -33,6 +37,16 @@ function AppInstallieren() {
       <p>
         Zum Installieren muss Truhenblick über eine sichere Verbindung (https://) geöffnet werden. Im Browser
         funktioniert die App trotzdem.
+        {adresse && (
+          <>
+            {' '}
+            Dieser Server ist dafür unter{' '}
+            <a className="text-akzent font-semibold break-all underline" href={`https://${adresse}`}>
+              https://{adresse}
+            </a>{' '}
+            erreichbar.
+          </>
+        )}
       </p>
     );
   }
@@ -75,6 +89,13 @@ export function Einstellungen() {
         hinweis="Optional: Mit einem eigenen Truhenblick-Server sehen alle Geräte im Haushalt denselben Stand. Ohne Server bleibt alles auf diesem Gerät."
       >
         <SyncEinstellungen />
+      </Abschnitt>
+
+      <Abschnitt
+        titel="Server"
+        hinweis="Unter welcher Adresse der Server erreichbar ist – und ob man sich mit einem Passwort anmelden muss."
+      >
+        <ServerEinstellungen />
       </Abschnitt>
 
       <Abschnitt

@@ -1,5 +1,5 @@
 import { eingehendeGewinnt } from '../../shared/sync.ts';
-import type { Artikel, Bereich, SyncAnfrage, SyncAntwort, SyncDoc, UpdateStand } from '../../shared/types.ts';
+import type { Artikel, Bereich, Erreichbarkeit, ServerEinstellungen, SyncAnfrage, SyncAntwort, SyncDoc, UpdateStand } from '../../shared/types.ts';
 import { bereinigeArtikel, bereinigeBereich, istArtikel, istBereich } from '../../shared/validierung.ts';
 import { db, metaLesen, metaSchreiben, ohneLokal, type Lokal } from '../db/db.ts';
 
@@ -10,7 +10,8 @@ export interface SyncKonfig {
 }
 
 export class SyncFehler extends Error {
-  art: 'token' | 'netz' | 'server' | 'gesperrt';
+  /** „anmeldung“: Der Server verlangt ein Passwort, und dieses Gerät ist nicht (mehr) angemeldet. */
+  art: 'token' | 'netz' | 'server' | 'gesperrt' | 'anmeldung';
 
   constructor(art: SyncFehler['art'], meldung: string) {
     super(meldung);
@@ -22,6 +23,25 @@ const KONFIG = 'sync.konfig';
 const REV = 'sync.rev';
 const SERVER_ID = 'sync.serverId';
 const LETZTER_ERFOLG = 'sync.letzterErfolg';
+const SITZUNG = 'sync.sitzung';
+
+/** Die Anmeldung dieses Geräts – sie gilt nur für den Server, bei dem sie entstanden ist. */
+interface Sitzung {
+  url: string;
+  wert: string;
+}
+
+async function sitzungFuer(url: string): Promise<string | null> {
+  const sitzung = await metaLesen<Sitzung>(SITZUNG);
+  return sitzung && sitzung.url === url ? sitzung.wert : null;
+}
+
+let beiFehlenderAnmeldung: (() => void) | null = null;
+
+/** Wird gerufen, sobald der Server eine Anfrage abweist, weil die Anmeldung fehlt. */
+export function horcheAufFehlendeAnmeldung(fn: (() => void) | null): void {
+  beiFehlenderAnmeldung = fn;
+}
 
 /** Macht aus der Eingabe eine saubere Basisadresse: „truhe.example.de/api/“ → „https://truhe.example.de“. */
 export function normalisiereUrl(eingabe: string): string {
@@ -87,7 +107,9 @@ async function rufe(
   koerper?: unknown,
   bei404?: string,
   methode?: 'DELETE',
+  bei401?: string,
 ): Promise<Record<string, unknown>> {
+  const sitzung = await sitzungFuer(konfig.url);
   let antwort: Response;
   try {
     antwort = await fetch(`${konfig.url}${pfad}`, {
@@ -95,6 +117,7 @@ async function rufe(
       headers: {
         // Ohne Code (Truhe anlegen, Server prüfen) wird keine Anmeldung mitgeschickt.
         ...(konfig.token ? { Authorization: `Bearer ${konfig.token}` } : {}),
+        ...(sitzung ? { 'X-Truhenblick-Sitzung': sitzung } : {}),
         ...(koerper === undefined ? {} : { 'Content-Type': 'application/json' }),
       },
       body: koerper === undefined ? undefined : JSON.stringify(koerper),
@@ -104,7 +127,15 @@ async function rufe(
   } catch {
     throw new SyncFehler('netz', 'Der Server ist nicht erreichbar.');
   }
-  if (antwort.status === 401) throw new SyncFehler('token', 'Der Zugangscode stimmt nicht.');
+  if (antwort.status === 401) {
+    // Der Server unterscheidet: Anmeldung fehlt (Passwort) – oder der Code der Truhe stimmt nicht.
+    const absage = await absageVon(antwort);
+    if (absage.art === 'anmeldung') {
+      beiFehlenderAnmeldung?.();
+      throw new SyncFehler('anmeldung', 'Dieser Server verlangt eine Anmeldung.');
+    }
+    throw new SyncFehler('token', bei401 ?? 'Der Zugangscode stimmt nicht.');
+  }
   if (antwort.status === 429) {
     throw new SyncFehler('gesperrt', (await serverMeldung(antwort)) ?? 'Zu viele Versuche – bitte in einigen Minuten erneut versuchen.');
   }
@@ -126,14 +157,21 @@ async function rufe(
   throw new SyncFehler('server', KEIN_SERVER);
 }
 
-/** Liest die Begründung aus einer Absage des Servers ({ fehler: "…" }). */
-async function serverMeldung(antwort: Response): Promise<string | null> {
+/** Liest eine Absage des Servers: { fehler: "…", art?: "anmeldung" }. */
+async function absageVon(antwort: Response): Promise<{ fehler: string | null; art: string | null }> {
   try {
-    const daten = (await antwort.json()) as { fehler?: unknown };
-    return typeof daten.fehler === 'string' && daten.fehler ? daten.fehler : null;
+    const daten = (await antwort.json()) as { fehler?: unknown; art?: unknown };
+    return {
+      fehler: typeof daten.fehler === 'string' && daten.fehler ? daten.fehler : null,
+      art: typeof daten.art === 'string' ? daten.art : null,
+    };
   } catch {
-    return null;
+    return { fehler: null, art: null };
   }
+}
+
+async function serverMeldung(antwort: Response): Promise<string | null> {
+  return (await absageVon(antwort)).fehler;
 }
 
 // ---------------------------------------------------------------- Truhen anlegen
@@ -143,7 +181,26 @@ export interface ServerInfo {
   da: boolean;
   /** Er nimmt neue Truhen an */
   neueTruhen: boolean;
+  /** Er verlangt ein Passwort */
+  anmeldung: boolean;
+  /** Dieses Gerät ist angemeldet – ohne Passwort auf dem Server immer true */
+  angemeldet: boolean;
+  erreichbarkeit: Erreichbarkeit;
+  /** Der in der App eingestellte Rechnername (z. B. „truhe.example.de“), falls es einen gibt */
+  adresse: string | null;
+  /** Kennung des Servers – zum Vergleich, ob unter einer anderen Adresse derselbe antwortet */
+  kennung: string | null;
 }
+
+export const NICHT_DA: ServerInfo = {
+  da: false,
+  neueTruhen: false,
+  anmeldung: false,
+  angemeldet: true,
+  erreichbarkeit: 'heimnetz',
+  adresse: null,
+  kennung: null,
+};
 
 /**
  * Gibt es unter der Adresse einen Truhenblick-Server – und lässt sich dort eine Truhe anlegen?
@@ -151,15 +208,34 @@ export interface ServerInfo {
  */
 export async function pruefeServer(url: string): Promise<ServerInfo> {
   try {
-    const antwort = await fetch(`${url}/api/health`, { cache: 'no-store', signal: AbortSignal.timeout(5000) });
-    if (!antwort.ok) return { da: false, neueTruhen: false };
-    const daten = (await antwort.json()) as { app?: unknown; neueTruhen?: unknown };
-    if (daten.app !== 'truhenblick') return { da: false, neueTruhen: false };
-    // Ältere Server kennen die Angabe nicht – und können auch keine Truhen anlegen.
-    return { da: true, neueTruhen: daten.neueTruhen === true };
+    const sitzung = await sitzungFuer(url);
+    const antwort = await fetch(`${url}/api/health`, {
+      headers: sitzung ? { 'X-Truhenblick-Sitzung': sitzung } : undefined,
+      cache: 'no-store',
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!antwort.ok) return NICHT_DA;
+    return leseServerInfo(await antwort.json());
   } catch {
-    return { da: false, neueTruhen: false };
+    return NICHT_DA;
   }
+}
+
+/** Prüft die Antwort von GET /api/health. Ältere Server kennen die meisten Angaben noch nicht. */
+export function leseServerInfo(roh: unknown): ServerInfo {
+  if (typeof roh !== 'object' || roh === null) return NICHT_DA;
+  const daten = roh as Record<string, unknown>;
+  if (daten.app !== 'truhenblick') return NICHT_DA;
+  const anmeldung = daten.anmeldung === true;
+  return {
+    da: true,
+    neueTruhen: daten.neueTruhen === true,
+    anmeldung,
+    angemeldet: anmeldung ? daten.angemeldet === true : true,
+    erreichbarkeit: daten.erreichbarkeit === 'proxy' || daten.erreichbarkeit === 'selbst' ? daten.erreichbarkeit : 'heimnetz',
+    adresse: typeof daten.adresse === 'string' && daten.adresse ? daten.adresse : null,
+    kennung: typeof daten.kennung === 'string' && daten.kennung ? daten.kennung : null,
+  };
 }
 
 /** Legt auf dem Server eine neue, leere Truhe an und liefert ihren Zugangscode. */
@@ -274,6 +350,100 @@ export async function erzeugeLeseSchluessel(): Promise<string> {
 export async function widerrufeLeseSchluessel(): Promise<void> {
   await rufe(await verbunden(), '/api/lesezugang', undefined, SERVER_OHNE_UEBERSICHT, 'DELETE');
   await db.meta.delete(LESE_SCHLUESSEL);
+}
+
+// ---------------------------------------------------------------- Anmeldung mit Passwort
+
+/** Der Server, mit dem dieses Gerät spricht: der verbundene – sonst der, von dem die App geladen wurde. */
+export async function serverUrl(): Promise<string> {
+  return (await ladeKonfig())?.url ?? '';
+}
+
+const SERVER_OHNE_ANMELDUNG = 'Dieser Server kennt das noch nicht. Bitte zuerst den Server aktualisieren.';
+
+function leseSitzung(daten: Record<string, unknown>): string {
+  if (typeof daten.sitzung !== 'string' || daten.sitzung.length < 16) throw new SyncFehler('server', KEIN_SERVER);
+  return daten.sitzung;
+}
+
+/** Meldet dieses Gerät mit dem Passwort des Servers an. Bei falschem Passwort: SyncFehler der Art „token“. */
+export async function meldeAn(passwort: string): Promise<void> {
+  const url = await serverUrl();
+  const daten = await rufe({ url, token: '' }, '/api/anmelden', { passwort }, SERVER_OHNE_ANMELDUNG, undefined, 'Das Passwort stimmt nicht.');
+  await metaSchreiben(SITZUNG, { url, wert: leseSitzung(daten) } satisfies Sitzung);
+}
+
+/** Meldet dieses Gerät ab. Die Daten auf dem Gerät bleiben, wie sie sind. */
+export async function meldeAb(): Promise<void> {
+  const url = await serverUrl();
+  try {
+    await rufe({ url, token: '' }, '/api/abmelden', {});
+  } catch {
+    // Auch wenn der Server gerade nicht antwortet: Dieses Gerät vergisst seine Anmeldung.
+  }
+  await db.meta.delete(SITZUNG);
+}
+
+// ---------------------------------------------------------------- Einstellungen des Servers
+
+function leseServerEinstellungen(daten: Record<string, unknown>): ServerEinstellungen {
+  const anfrage = daten.anfrage as { host?: unknown; https?: unknown; ueberProxy?: unknown } | undefined;
+  if (typeof daten.betreiber !== 'boolean' || typeof anfrage !== 'object' || anfrage === null) throw new SyncFehler('server', KEIN_SERVER);
+  return {
+    betreiber: daten.betreiber,
+    erreichbarkeit: daten.erreichbarkeit === 'proxy' || daten.erreichbarkeit === 'selbst' ? daten.erreichbarkeit : 'heimnetz',
+    adresse: typeof daten.adresse === 'string' ? daten.adresse : '',
+    anmeldung: daten.anmeldung === true,
+    sitzungen: typeof daten.sitzungen === 'number' ? daten.sitzungen : 0,
+    anfrage: {
+      host: typeof anfrage.host === 'string' ? anfrage.host : '',
+      https: anfrage.https === true,
+      ueberProxy: anfrage.ueberProxy === true,
+    },
+  };
+}
+
+/** Adresse, Erreichbarkeit und Anmeldung des Servers – ändern dürfen sie nur Geräte der zuerst angelegten Truhe. */
+export async function holeServerEinstellungen(): Promise<ServerEinstellungen> {
+  return leseServerEinstellungen(await rufe(await verbunden(), '/api/server', undefined, SERVER_OHNE_ANMELDUNG));
+}
+
+export async function speichereServerEinstellungen(erreichbarkeit: Erreichbarkeit, adresse: string): Promise<ServerEinstellungen> {
+  return leseServerEinstellungen(await rufe(await verbunden(), '/api/server', { erreichbarkeit, adresse }, SERVER_OHNE_ANMELDUNG));
+}
+
+/**
+ * Legt das Passwort fest oder ändert es; `null` schaltet die Anmeldung ab.
+ * Alle anderen Geräte müssen sich danach neu anmelden – dieses bleibt angemeldet.
+ */
+export async function setzePasswort(passwort: string | null): Promise<void> {
+  const konfig = await verbunden();
+  const daten = await rufe(konfig, '/api/passwort', { passwort }, SERVER_OHNE_ANMELDUNG);
+  if (passwort === null) await db.meta.delete(SITZUNG);
+  else await metaSchreiben(SITZUNG, { url: konfig.url, wert: leseSitzung(daten) } satisfies Sitzung);
+}
+
+/** Meldet alle anderen Geräte ab. */
+export async function meldeAndereAb(): Promise<void> {
+  await rufe(await verbunden(), '/api/sitzungen', undefined, SERVER_OHNE_ANMELDUNG, 'DELETE');
+}
+
+export type AdressPruefung = 'ok' | 'anderer-server' | 'nicht-erreichbar';
+
+/**
+ * Antwortet unter https://<adresse> wirklich dieser Server? Vergleicht die Kennung aus der Auskunft,
+ * die jeder Truhenblick-Server ohne Anmeldung gibt.
+ */
+export async function pruefeAdresse(adresse: string, kennung: string | null): Promise<AdressPruefung> {
+  try {
+    const antwort = await fetch(`https://${adresse}/api/health`, { cache: 'no-store', signal: AbortSignal.timeout(15_000) });
+    if (!antwort.ok) return 'nicht-erreichbar';
+    const info = leseServerInfo(await antwort.json());
+    if (!info.da) return 'anderer-server';
+    return kennung !== null && info.kennung === kennung ? 'ok' : 'anderer-server';
+  } catch {
+    return 'nicht-erreichbar';
+  }
 }
 
 // ---------------------------------------------------------------- Aktualisierung des Servers

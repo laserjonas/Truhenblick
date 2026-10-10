@@ -1,9 +1,19 @@
 # Caddy im Truhenblick-Container: liefert die App aus und reicht /api an das Sync-Backend weiter.
 #
-# SITE_ADDRESS = :80              → nur HTTP, für den Betrieb hinter einem eigenen Reverse Proxy
-# SITE_ADDRESS = truhe.example.de → Caddy holt selbst ein Zertifikat (Ports 80 und 443 veröffentlichen)
+# Hier steht bewusst keine Adresse. Port 80 antwortet unter jedem Namen – der IP im Heimnetz
+# genauso wie dem Namen, unter dem ein vorgeschalteter Reverse Proxy (z. B. Nginx Proxy Manager)
+# die App erreichbar macht. Welche Adresse gilt, wird in der App eingestellt:
+# Einstellungen → Server.
+#
+# Port 443 ist für „Truhenblick holt das Zertifikat selbst“ da: Caddy fragt beim Backend nach,
+# ob er für den angefragten Namen eines holen darf, und tut es nur für die eingestellte Adresse.
+{
+	on_demand_tls {
+		ask http://{$API_UPSTREAM:api:3000}/api/zertifikat
+	}
+}
 
-{$SITE_ADDRESS::80} {
+(truhenblick) {
 	encode zstd gzip
 
 	header {
@@ -15,7 +25,14 @@
 	# Sync-Backend (optional). Läuft es nicht, antwortet Caddy hier mit 502 –
 	# die App funktioniert trotzdem vollständig lokal.
 	handle /api/* {
-		reverse_proxy {$API_UPSTREAM:api:3000}
+		# Die Rückfrage von oben ist nur für Caddy selbst gedacht.
+		@intern path /api/zertifikat
+		respond @intern 404
+
+		reverse_proxy {$API_UPSTREAM:api:3000} {
+			# Einem Reverse Proxy im privaten Netz glauben, von welchem Gerät eine Anfrage stammt.
+			trusted_proxies private_ranges
+		}
 	}
 
 	handle {
@@ -25,6 +42,13 @@
 		@frisch path / /index.html /sw.js /registerSW.js /manifest.webmanifest
 		header @frisch Cache-Control "no-cache"
 
+		# Manche Proxys speichern .js-Dateien zwischen, was auch immer oben steht (in Nginx Proxy
+		# Manager: „Cache Assets“). „Vary: *“ verbietet ihnen das für den Service Worker.
+		header /sw.js {
+			Vary "*"
+			defer
+		}
+
 		# Dateien unter /assets tragen einen Hash im Namen und ändern sich nie.
 		@assets path /assets/*
 		header @assets Cache-Control "public, max-age=31536000, immutable"
@@ -32,4 +56,16 @@
 		try_files {path} /index.html
 		file_server
 	}
+}
+
+:80 {
+	import truhenblick
+}
+
+https:// {
+	tls {
+		on_demand
+	}
+
+	import truhenblick
 }

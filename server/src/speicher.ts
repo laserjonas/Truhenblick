@@ -37,11 +37,25 @@ export interface Speicher {
   /** Prüfsumme des SYNC_TOKEN, der zuletzt auf die erste Truhe angewandt wurde (siehe app.ts). */
   envHashLesen(): string | null;
   envHashSchreiben(hash: string): void;
+  /** Einstellungen des Servers, die in der App geändert werden (Adresse, Passwort-Prüfsumme …). */
+  einstellung(schluessel: string): string | null;
+  einstellungSetzen(schluessel: string, wert: string | null): void;
+  /**
+   * Anmeldungen auf Geräten. Gespeichert wird die Prüfsumme der Kennung; Zeiten in Millisekunden.
+   * Beim Anlegen verschwinden Anmeldungen, die seit `aeltestens` nicht mehr benutzt wurden.
+   */
+  sitzungAnlegen(hash: string, jetzt: number, aeltestens: number): void;
+  /** Gültig, wenn bekannt und seit `aeltestens` benutzt. Merkt sich die Benutzung. */
+  sitzungGueltig(hash: string, jetzt: number, aeltestens: number): boolean;
+  sitzungBeenden(hash: string): void;
+  /** Beendet alle Anmeldungen – auf Wunsch außer einer. */
+  sitzungenBeenden(ausser?: string): void;
+  anzahlSitzungen(): number;
   stand(): { truhen: number; datensaetze: number };
   schliessen(): void;
 }
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS truhen (
@@ -65,7 +79,15 @@ const SCHEMA = `
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS sitzungen (
+    hash        TEXT    PRIMARY KEY,
+    erstellt_am INTEGER NOT NULL,
+    zuletzt_am  INTEGER NOT NULL
+  );
 `;
+
+/** So oft wird höchstens vermerkt, dass eine Anmeldung benutzt wurde – spart Schreibzugriffe. */
+const SITZUNG_MERKEN_MS = 60 * 60 * 1000;
 
 /**
  * Bis Version 0.2 gab es genau einen Datenbestand je Server und einen Zugangscode aus der
@@ -159,6 +181,16 @@ export function oeffneSpeicher(pfad: string): Speicher {
   const truheNachLese = db.prepare<[string], TruheZeile>('SELECT id, rev, erstellt_am FROM truhen WHERE lese_hash = ?');
   const leseSetzen = db.prepare<[string | null, string]>('UPDATE truhen SET lese_hash = ? WHERE id = ?');
   const leseLesen = db.prepare<[string], { lese_hash: string | null }>('SELECT lese_hash FROM truhen WHERE id = ?');
+  const metaLoeschen = db.prepare<[string]>('DELETE FROM meta WHERE key = ?');
+  const sitzungEinfuegen = db.prepare<[string, number, number]>(
+    'INSERT OR REPLACE INTO sitzungen (hash, erstellt_am, zuletzt_am) VALUES (?, ?, ?)',
+  );
+  const sitzungLesen = db.prepare<[string], { zuletzt_am: number }>('SELECT zuletzt_am FROM sitzungen WHERE hash = ?');
+  const sitzungBenutzt = db.prepare<[number, string]>('UPDATE sitzungen SET zuletzt_am = ? WHERE hash = ?');
+  const sitzungLoeschen = db.prepare<[string]>('DELETE FROM sitzungen WHERE hash = ?');
+  const sitzungenAlt = db.prepare<[number]>('DELETE FROM sitzungen WHERE zuletzt_am < ?');
+  const sitzungenAlle = db.prepare<[string]>('DELETE FROM sitzungen WHERE hash <> ?');
+  const sitzungenZaehlen = db.prepare<[], { n: number }>('SELECT COUNT(*) AS n FROM sitzungen');
 
   const truheAnlegen = db.transaction((codeHash: string): Truhe => {
     const id = randomUUID();
@@ -219,6 +251,32 @@ export function oeffneSpeicher(pfad: string): Speicher {
     envHashSchreiben: (hash) => {
       metaSchreiben.run('env_hash', hash);
     },
+    einstellung: (schluessel) => metaLesen.get(`einstellung.${schluessel}`)?.value ?? null,
+    einstellungSetzen: (schluessel, wert) => {
+      if (wert === null) metaLoeschen.run(`einstellung.${schluessel}`);
+      else metaSchreiben.run(`einstellung.${schluessel}`, wert);
+    },
+    sitzungAnlegen: (hash, jetzt, aeltestens) => {
+      sitzungenAlt.run(aeltestens);
+      sitzungEinfuegen.run(hash, jetzt, jetzt);
+    },
+    sitzungGueltig: (hash, jetzt, aeltestens) => {
+      const zeile = sitzungLesen.get(hash);
+      if (!zeile) return false;
+      if (zeile.zuletzt_am < aeltestens) {
+        sitzungLoeschen.run(hash);
+        return false;
+      }
+      if (jetzt - zeile.zuletzt_am > SITZUNG_MERKEN_MS) sitzungBenutzt.run(jetzt, hash);
+      return true;
+    },
+    sitzungBeenden: (hash) => {
+      sitzungLoeschen.run(hash);
+    },
+    sitzungenBeenden: (ausser) => {
+      sitzungenAlle.run(ausser ?? '');
+    },
+    anzahlSitzungen: () => sitzungenZaehlen.get()?.n ?? 0,
     stand: () => ({ truhen: truhenZaehlen.get()?.n ?? 0, datensaetze: zaehlen.get()?.n ?? 0 }),
     schliessen: () => db.close(),
   };

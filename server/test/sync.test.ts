@@ -74,11 +74,22 @@ beforeEach(() => {
 
 afterEach(() => speicher.schliessen());
 
-describe('Anmeldung', () => {
+describe('Zugang mit dem Code der Truhe', () => {
   it('lässt /api/health ohne Code zu', async () => {
     const antwort = await app.request('/api/health');
     assert.equal(antwort.status, 200);
-    assert.deepEqual(await antwort.json(), { ok: true, app: 'truhenblick', version: 'dev', neueTruhen: true });
+    const { kennung, ...rest } = (await antwort.json()) as Record<string, unknown>;
+    assert.deepEqual(rest, {
+      ok: true,
+      app: 'truhenblick',
+      version: 'dev',
+      neueTruhen: true,
+      anmeldung: false,
+      angemeldet: true,
+      erreichbarkeit: 'heimnetz',
+      adresse: null,
+    });
+    assert.match(String(kennung), /^[\w-]{12}$/);
   });
 
   it('weist fehlende und falsche Codes ab', async () => {

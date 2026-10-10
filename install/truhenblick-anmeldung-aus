@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+#
+# Truhenblick – Anmeldung mit Passwort abschalten
+#
+# Notausgang, wenn niemand mehr das Passwort kennt und kein Gerät mehr angemeldet ist.
+# Danach lässt sich die App wieder ohne Passwort öffnen; ein neues legt man dort fest:
+# Einstellungen → Server → Anmeldung. Truhen, Daten und Zugangscodes bleiben unberührt.
+#
+#   truhenblick-anmeldung-aus
+#   pct exec <ID> -- truhenblick-anmeldung-aus     (vom Proxmox-Host aus)
+#
+# Der Dienst läuft dabei weiter – er liest die Einstellung bei jeder Anfrage neu.
+
+set -Eeuo pipefail
+
+# Auch mit knapper Umgebung (pct exec) alle üblichen Verzeichnisse durchsuchen
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin${PATH:+:$PATH}"
+
+APP=/opt/truhenblick/app
+SERVER_ENV=/etc/truhenblick/server.env
+
+[[ $EUID -eq 0 ]] || { echo "Fehler: Bitte als root ausführen." >&2; exit 1; }
+if [[ ! -f "$SERVER_ENV" || ! -f "$APP/server/src/index.ts" ]]; then
+  echo "Fehler: Auf diesem System ist kein Truhenblick-Sync-Backend eingerichtet." >&2
+  exit 1
+fi
+
+# Dieselben Einstellungen wie der Dienst (vor allem DATA_DIR), aber nur für diesen einen Aufruf
+set -a
+# shellcheck disable=SC1090
+. "$SERVER_ENV"
+set +a
+
+cd "$APP"
+exec runuser -u truhenblick -- "$(command -v node)" server/src/index.ts --anmeldung-aus

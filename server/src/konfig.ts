@@ -1,4 +1,5 @@
 import { resolve } from 'node:path';
+import type { Erreichbarkeit } from '../../shared/types.ts';
 
 export interface Konfig {
   port: number;
@@ -11,6 +12,12 @@ export interface Konfig {
   maxTruhen: number;
   /** Erlaubte Herkünfte für Browser-Anfragen von einer anderen Adresse; leer = nur gleiche Adresse */
   corsOrigins: string[];
+  /**
+   * Startwerte für die Einstellungen, die sonst in der App gemacht werden. Sie gelten nur, solange dort
+   * noch nichts eingestellt wurde.
+   */
+  startAdresse: string | undefined;
+  startErreichbarkeit: Erreichbarkeit | undefined;
 }
 
 export const MIN_TOKEN_LAENGE = 16;
@@ -39,6 +46,10 @@ export function leseKonfig(env: NodeJS.ProcessEnv = process.env): Konfig {
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new KonfigFehler(`PORT ist keine gültige Portnummer: ${env.PORT}`);
   }
+  const start = (env.START_ERREICHBARKEIT ?? '').trim().toLowerCase();
+  if (start && start !== 'heimnetz' && start !== 'proxy' && start !== 'selbst') {
+    throw new KonfigFehler(`START_ERREICHBARKEIT muss „heimnetz“, „proxy“ oder „selbst“ sein, nicht: ${env.START_ERREICHBARKEIT}`);
+  }
   return {
     port,
     host: env.HOST?.trim() || '0.0.0.0',
@@ -50,5 +61,7 @@ export function leseKonfig(env: NodeJS.ProcessEnv = process.env): Konfig {
       .split(',')
       .map((o) => o.trim().replace(/\/+$/, ''))
       .filter(Boolean),
+    startAdresse: env.START_ADRESSE?.trim() || undefined,
+    startErreichbarkeit: (start || undefined) as Erreichbarkeit | undefined,
   };
 }

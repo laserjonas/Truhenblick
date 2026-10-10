@@ -15,7 +15,7 @@
 # Einstellungen (Umgebungsvariablen, sonst gespeicherte Werte, sonst Standard):
 #   TB_PORT        Port der Web-App                         (80)
 #   TB_SYNC        1 = Sync-Backend installieren, 0 = ohne  (0)
-#   TB_SYNC_TOKEN  Zugangs-Token; leer = behalten bzw. neu erzeugen
+#   TB_SYNC_TOKEN  Zugangscode; leer = behalten bzw. neu erzeugen
 #   TB_REPO        Git-Adresse der Quellen
 #   TB_BRANCH      Zweig                                    (main)
 #
@@ -87,9 +87,9 @@ TB_BRANCH="${UMGEBUNG_BRANCH:-${TB_BRANCH:-main}}"
 [[ "$TB_PORT" =~ ^[0-9]+$ ]] && (( TB_PORT >= 1 && TB_PORT <= 65535 )) || abbruch "TB_PORT ist kein gültiger Port: $TB_PORT"
 [[ "$TB_SYNC" == "0" || "$TB_SYNC" == "1" ]] || abbruch "TB_SYNC muss 0 oder 1 sein."
 if [[ -n "$TB_SYNC_TOKEN" && ${#TB_SYNC_TOKEN} -lt 16 ]]; then
-  abbruch "Das Zugangs-Token muss mindestens 16 Zeichen lang sein."
+  abbruch "Der Zugangscode muss mindestens 16 Zeichen lang sein."
 fi
-[[ "$TB_SYNC_TOKEN" =~ ^[A-Za-z0-9._~+/=-]*$ ]] || abbruch "Das Zugangs-Token darf nur Buchstaben, Ziffern und . _ ~ + / = - enthalten."
+[[ "$TB_SYNC_TOKEN" =~ ^[A-Za-z0-9._~+/=-]*$ ]] || abbruch "Der Zugangscode darf nur Buchstaben, Ziffern und . _ ~ + / = - enthalten."
 
 # ------------------------------------------------------------------ Systempakete
 
@@ -399,10 +399,11 @@ printf '\n%sTruhenblick %s ist eingerichtet.%s\n' "$FETT$GRUEN" "$VERSION" "$AUS
 printf '  Adresse:   %s\n' "$(adresse)"
 if [[ "$TB_SYNC" == "1" ]]; then
   if [[ "$MODUS" == "install" || "$TOKEN_NEU" == "1" ]]; then
-    printf '  Sync:      aktiv – Zugangs-Token: %s%s%s\n' "$FETT" "$SYNC_TOKEN_AKTUELL" "$AUS"
-    printf '             (steht auch in %s)\n' "$SERVER_ENV"
+    printf '  Sync:      aktiv – Zugangscode: %s%s%s\n' "$FETT" "$SYNC_TOKEN_AKTUELL" "$AUS"
+    printf '             (steht auch in %s; in der App lässt er sich\n' "$SERVER_ENV"
+    printf '             später anzeigen und neu erzeugen)\n'
   else
-    printf '  Sync:      aktiv – Token unverändert (%s)\n' "$SERVER_ENV"
+    printf '  Sync:      aktiv – Zugangscode unverändert\n'
   fi
 else
   printf '  Sync:      nicht installiert\n'

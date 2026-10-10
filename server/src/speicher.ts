@@ -10,7 +10,21 @@ export interface Speicher {
   sync(anfrage: SyncAnfrage): SyncAntwort;
   /** Aktueller Stand (für /api/health und Tests) */
   stand(): { serverId: string; rev: number; datensaetze: number };
+  /**
+   * In der App neu erzeugter Zugangscode. Gespeichert wird nur seine Prüfsumme –
+   * zusammen mit der Prüfsumme des SYNC_TOKEN, der zu diesem Zeitpunkt eingestellt war.
+   */
+  codeLesen(): GespeicherterCode | null;
+  codeSchreiben(code: GespeicherterCode): void;
+  codeLoeschen(): void;
   schliessen(): void;
+}
+
+export interface GespeicherterCode {
+  /** SHA-256 des Zugangscodes (hex) */
+  codeHash: string;
+  /** SHA-256 des SYNC_TOKEN aus der Konfiguration, als der Code erzeugt wurde (hex) */
+  envHash: string;
 }
 
 /**
@@ -45,6 +59,7 @@ export function oeffneSpeicher(pfad: string): Speicher {
   const metaSchreiben = db.prepare<[string, string]>(
     'INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value',
   );
+  const metaLoeschen = db.prepare<[string]>('DELETE FROM meta WHERE key = ?');
   const lesen = db.prepare<[Tabelle, string], { daten: string }>('SELECT daten FROM docs WHERE tabelle = ? AND id = ?');
   const schreiben = db.prepare<[Tabelle, string, string, number, string]>(`
     INSERT INTO docs (tabelle, id, geaendert_am, rev, daten) VALUES (?, ?, ?, ?, ?)
@@ -88,6 +103,19 @@ export function oeffneSpeicher(pfad: string): Speicher {
   return {
     sync: (anfrage) => sync.immediate(anfrage),
     stand: () => ({ serverId, rev: aktuelleRev(), datensaetze: zaehlen.get()?.n ?? 0 }),
+    codeLesen: () => {
+      const codeHash = metaLesen.get('code_hash')?.value;
+      const envHash = metaLesen.get('code_env_hash')?.value;
+      return codeHash && envHash ? { codeHash, envHash } : null;
+    },
+    codeSchreiben: db.transaction((code: GespeicherterCode) => {
+      metaSchreiben.run('code_hash', code.codeHash);
+      metaSchreiben.run('code_env_hash', code.envHash);
+    }),
+    codeLoeschen: () => {
+      metaLoeschen.run('code_hash');
+      metaLoeschen.run('code_env_hash');
+    },
     schliessen: () => db.close(),
   };
 }

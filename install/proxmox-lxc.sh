@@ -95,7 +95,7 @@ Truhenblick
   --port PORT              Port der Web-App                  (TB_PORT, Standard: 80)
   --with-sync              mit Sync-Backend                  (TB_SYNC=1, Standard)
   --no-sync                ohne Sync-Backend                 (TB_SYNC=0)
-  --sync-token TOKEN       Zugangs-Token (min. 16 Zeichen)   (TB_SYNC_TOKEN, Standard: wird erzeugt)
+  --sync-token CODE        Zugangscode (min. 16 Zeichen)     (TB_SYNC_TOKEN, Standard: wird erzeugt)
   --repo URL               Git-Adresse der Quellen           (TB_REPO)
   --branch NAME            Zweig                             (TB_BRANCH, Standard: main)
 
@@ -519,7 +519,7 @@ pruefe_vlan "$VLAN" || abbruch "Ungültiger VLAN-Tag: $VLAN (1 bis 4094)"
 pruefe_port "$PORT" || abbruch "Ungültiger Port: $PORT"
 [[ "$UNPRIVILEGIERT" == 0 || "$UNPRIVILEGIERT" == 1 ]] || abbruch "TB_UNPRIVILEGED muss 0 oder 1 sein."
 [[ "$MIT_SYNC" == 0 || "$MIT_SYNC" == 1 ]] || abbruch "TB_SYNC muss 0 oder 1 sein."
-pruefe_token "$SYNC_TOKEN" || abbruch "Das Zugangs-Token muss mindestens 16 Zeichen lang sein und darf nur Buchstaben, Ziffern und . _ ~ + / = - enthalten."
+pruefe_token "$SYNC_TOKEN" || abbruch "Der Zugangscode muss mindestens 16 Zeichen lang sein und darf nur Buchstaben, Ziffern und . _ ~ + / = - enthalten."
 [[ -z "$PASSWORT" || ${#PASSWORT} -ge 5 ]] || abbruch "Das Root-Passwort muss mindestens 5 Zeichen lang sein."
 
 # SSH-Schlüssel: Datei oder direkt der Schlüssel
@@ -734,9 +734,10 @@ if [[ "$MIT_SYNC" == 1 ]]; then
   cat <<EOF
 
   ${FETT}Abgleich zwischen Geräten${AUS}
-  Zugangs-Token:  ${FETT}${SYNC_TOKEN}${AUS}
+  Zugangscode:    ${FETT}${SYNC_TOKEN}${AUS}
   In der App unter Einstellungen → „Abgleich zwischen Geräten“ eintragen.
-  Das Token steht auch im Container in /etc/truhenblick/server.env.
+  Dort lässt er sich später auch anzeigen und neu erzeugen. Dieser Anfangscode
+  steht außerdem im Container in /etc/truhenblick/server.env.
   Datenbank:      /var/lib/truhenblick/truhenblick.sqlite (im Container)
 EOF
 fi

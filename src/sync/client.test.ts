@@ -4,7 +4,17 @@ import { eingehendeGewinnt } from '../../shared/sync.ts';
 import type { Artikel, Bereich, SyncDoc } from '../../shared/types.ts';
 import { db } from '../db/db.ts';
 import { artikelAendern, artikelAnlegen, artikelEntnehmen, bereichAnlegen } from '../db/repo.ts';
-import { entferneKonfig, normalisiereUrl, speichereKonfig, SyncFehler, synchronisiere, type Sende } from './client.ts';
+import {
+  entferneKonfig,
+  erneuereCode,
+  gespeicherterCode,
+  normalisiereUrl,
+  speichereKonfig,
+  SyncFehler,
+  synchronisiere,
+  wechsleCode,
+  type Sende,
+} from './client.ts';
 
 /** Server im Speicher mit demselben Protokoll wie das echte Backend. */
 function testServer() {
@@ -186,6 +196,56 @@ describe('synchronisiere', () => {
     await synchronisiere(server.sende);
     expect(server.anzahl()).toBe(2);
     expect(await db.artikel.where('dirty').equals(1).count()).toBe(0);
+  });
+
+  it('behält den Abgleichsstand, wenn ein neuer Zugangscode erzeugt wird', async () => {
+    const server = testServer();
+    const korb = await bereichAnlegen('Korb', 'korb');
+    await hack(korb.id);
+    await synchronisiere(server.sende);
+    const vorher = server.anfragen();
+
+    let benutzt = '';
+    const code = await erneuereCode(async (konfig) => {
+      benutzt = konfig.token;
+      return 'k7m2-9xqp-4hrt-w3vn-8dzj';
+    });
+    expect(benutzt).toBe('geheim');
+    expect(code).toBe('k7m2-9xqp-4hrt-w3vn-8dzj');
+    expect(await gespeicherterCode()).toBe(code);
+
+    // Nichts wird erneut hochgeladen – nur der Code hat sich geändert.
+    let gesendetMit = '';
+    const merkend: Sende = (konfig, anfrage) => {
+      gesendetMit = konfig.token;
+      return server.sende(konfig, anfrage);
+    };
+    expect(await synchronisiere(merkend)).toEqual({ gesendet: 0, empfangen: 0 });
+    expect(gesendetMit).toBe(code);
+    expect(server.anfragen()).toBe(vorher + 1);
+  });
+
+  it('lässt den Code unverändert, wenn das Erzeugen scheitert', async () => {
+    await expect(
+      erneuereCode(async () => {
+        throw new SyncFehler('netz', 'Der Server ist nicht erreichbar.');
+      }),
+    ).rejects.toThrow(SyncFehler);
+    expect(await gespeicherterCode()).toBe('geheim');
+  });
+
+  it('übernimmt einen eingegebenen Code nur, wenn der Server ihn annimmt', async () => {
+    const server = testServer();
+    const nurMit = (gueltig: string): Sende => async (konfig, anfrage) => {
+      if (konfig.token !== gueltig) throw new SyncFehler('token', 'Der Zugangscode stimmt nicht.');
+      return server.sende(konfig, anfrage);
+    };
+
+    await expect(wechsleCode('falscher-code-123456', nurMit('neuer-code-12345678'))).rejects.toThrow(/stimmt nicht/);
+    expect(await gespeicherterCode()).toBe('geheim');
+
+    await wechsleCode('  neuer-code-12345678 ', nurMit('neuer-code-12345678'));
+    expect(await gespeicherterCode()).toBe('neuer-code-12345678');
   });
 
   it('übernimmt keine ungültigen Datensätze vom Server', async () => {

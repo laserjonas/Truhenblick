@@ -67,43 +67,99 @@ async function allesVormerken(): Promise<void> {
 
 export type Sende = (konfig: SyncKonfig, anfrage: SyncAnfrage) => Promise<SyncAntwort>;
 
-/** Schickt eine Anfrage an den Server und übersetzt Fehler in verständliche Meldungen. */
-export const sendeAnfrage: Sende = async (konfig, anfrage) => {
+const KEIN_SERVER = 'Unter dieser Adresse antwortet kein Truhenblick-Server.';
+
+/** POST an das Backend; übersetzt Fehler in verständliche Meldungen. `bei404` ersetzt die Meldung für „unbekannt“. */
+async function post(konfig: SyncKonfig, pfad: string, koerper: unknown, bei404?: string): Promise<Record<string, unknown>> {
   let antwort: Response;
   try {
-    antwort = await fetch(`${konfig.url}/api/sync`, {
+    antwort = await fetch(`${konfig.url}${pfad}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${konfig.token}` },
-      body: JSON.stringify(anfrage),
+      body: JSON.stringify(koerper),
       cache: 'no-store',
       signal: AbortSignal.timeout(20_000),
     });
   } catch {
     throw new SyncFehler('netz', 'Der Server ist nicht erreichbar.');
   }
-  if (antwort.status === 401) throw new SyncFehler('token', 'Das Zugangs-Token stimmt nicht.');
+  if (antwort.status === 401) throw new SyncFehler('token', 'Der Zugangscode stimmt nicht.');
   if (antwort.status === 429) throw new SyncFehler('gesperrt', 'Zu viele Fehlversuche – bitte in einigen Minuten erneut versuchen.');
+  if (antwort.status === 404 && bei404) throw new SyncFehler('server', bei404);
   if ([404, 502, 503, 504].includes(antwort.status)) {
     throw new SyncFehler('server', 'Unter dieser Adresse ist kein Truhenblick-Sync-Backend erreichbar.');
   }
   if (!antwort.ok) throw new SyncFehler('server', `Der Server meldet einen Fehler (${antwort.status}).`);
 
-  let daten: Partial<SyncAntwort>;
   try {
-    daten = (await antwort.json()) as Partial<SyncAntwort>;
+    const daten: unknown = await antwort.json();
+    if (typeof daten === 'object' && daten !== null) return daten as Record<string, unknown>;
   } catch {
-    throw new SyncFehler('server', 'Unter dieser Adresse antwortet kein Truhenblick-Server.');
+    // unten gemeldet
   }
+  throw new SyncFehler('server', KEIN_SERVER);
+}
+
+/** Schickt eine Sync-Anfrage an den Server. */
+export const sendeAnfrage: Sende = async (konfig, anfrage) => {
+  const daten = await post(konfig, '/api/sync', anfrage);
   if (
     typeof daten.serverId !== 'string' ||
     typeof daten.rev !== 'number' ||
     !Array.isArray(daten.bereiche) ||
     !Array.isArray(daten.artikel)
   ) {
-    throw new SyncFehler('server', 'Unter dieser Adresse antwortet kein Truhenblick-Server.');
+    throw new SyncFehler('server', KEIN_SERVER);
   }
-  return daten as SyncAntwort;
+  return daten as unknown as SyncAntwort;
 };
+
+export type FordereCode = (konfig: SyncKonfig) => Promise<string>;
+
+/** Lässt den Server einen neuen Zugangscode erzeugen; der bisherige gilt danach nicht mehr. */
+export const fordereNeuenCode: FordereCode = async (konfig) => {
+  const daten = await post(
+    konfig,
+    '/api/code',
+    {},
+    'Dieser Server kann noch keine Codes erzeugen. Bitte zuerst den Server aktualisieren (truhenblick-update).',
+  );
+  if (typeof daten.code !== 'string' || daten.code.length < 16) throw new SyncFehler('server', KEIN_SERVER);
+  return daten.code;
+};
+
+/** Der auf diesem Gerät hinterlegte Zugangscode (zum Anzeigen für weitere Geräte). */
+export async function gespeicherterCode(): Promise<string | null> {
+  return (await ladeKonfig())?.token ?? null;
+}
+
+/**
+ * Erzeugt einen neuen Zugangscode und hinterlegt ihn auf diesem Gerät.
+ * Der Abgleichsstand bleibt erhalten – es ändert sich nur der Code.
+ */
+export async function erneuereCode(fordere: FordereCode = fordereNeuenCode): Promise<string> {
+  const konfig = await ladeKonfig();
+  if (!konfig) throw new SyncFehler('server', 'Dieses Gerät ist mit keinem Server verbunden.');
+  const code = await fordere(konfig);
+  await metaSchreiben(KONFIG, { ...konfig, token: code });
+  return code;
+}
+
+/**
+ * Hinterlegt einen anderen Zugangscode (wenn auf einem anderen Gerät ein neuer erzeugt wurde)
+ * und gleicht damit ab. Stimmt er nicht, bleibt der bisherige gespeichert.
+ */
+export async function wechsleCode(code: string, sende: Sende = sendeAnfrage): Promise<void> {
+  const konfig = await ladeKonfig();
+  if (!konfig) throw new SyncFehler('server', 'Dieses Gerät ist mit keinem Server verbunden.');
+  await metaSchreiben(KONFIG, { ...konfig, token: code.trim() });
+  try {
+    await synchronisiere(sende);
+  } catch (fehler) {
+    if (fehler instanceof SyncFehler && fehler.art === 'token') await metaSchreiben(KONFIG, konfig);
+    throw fehler;
+  }
+}
 
 interface Tabelle<T extends SyncDoc> {
   get(id: string): Promise<(T & Lokal) | undefined>;

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import type { Hono } from 'hono';
 import type { Artikel, Bereich, SyncAntwort } from '../../shared/types.ts';
-import { erstelleApp } from '../src/app.ts';
+import { erstelleApp, erzeugeCode } from '../src/app.ts';
 import { KonfigFehler, leseKonfig } from '../src/konfig.ts';
 import { oeffneSpeicher, type Speicher } from '../src/speicher.ts';
 
@@ -50,7 +50,7 @@ async function sync(seit: number, bereiche: Bereich[] = [], artikelListe: Artike
 
 beforeEach(() => {
   speicher = oeffneSpeicher(':memory:');
-  app = erstelleApp({ speicher, token: TOKEN });
+  app = erstelleApp({ speicher, token: TOKEN, melde: () => {} });
 });
 
 afterEach(() => speicher.schliessen());
@@ -146,6 +146,65 @@ describe('Abgleich', () => {
     const zweiter = await sync(erster.rev, [], [doc]);
     assert.equal(zweiter.rev, erster.rev);
     assert.deepEqual(zweiter.artikel, []);
+  });
+});
+
+describe('Zugangscode', () => {
+  const LEER = { seit: 0, bereiche: [], artikel: [] };
+  const FORM = /^[a-hjkmnp-z2-9]{4}(-[a-hjkmnp-z2-9]{4}){4}$/;
+
+  async function neuerCode(token: string | null = TOKEN): Promise<Response> {
+    return app.request('/api/code', { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  }
+
+  it('erzeugt gut abtippbare, jedes Mal andere Codes', () => {
+    const codes = new Set(Array.from({ length: 50 }, erzeugeCode));
+    assert.equal(codes.size, 50);
+    for (const code of codes) assert.match(code, FORM);
+  });
+
+  it('löst den bisherigen Code sofort ab', async () => {
+    const antwort = await neuerCode();
+    assert.equal(antwort.status, 200);
+    const { code } = (await antwort.json()) as { code: string };
+    assert.match(code, FORM);
+
+    assert.equal((await sende(LEER, TOKEN)).status, 401);
+    assert.equal((await sende(LEER, code)).status, 200);
+  });
+
+  it('lässt sich nur mit dem gültigen Code erneuern', async () => {
+    assert.equal((await neuerCode(null)).status, 401);
+    assert.equal((await neuerCode('falsch')).status, 401);
+    assert.equal(speicher.codeLesen(), null);
+    assert.equal((await sende(LEER)).status, 200);
+  });
+
+  it('speichert auf dem Server nur eine Prüfsumme', async () => {
+    const { code } = (await (await neuerCode()).json()) as { code: string };
+    const abgelegt = speicher.codeLesen();
+    assert.ok(abgelegt);
+    assert.match(abgelegt.codeHash, /^[0-9a-f]{64}$/);
+    assert.ok(!JSON.stringify(abgelegt).includes(code));
+  });
+
+  it('gilt nach einem Neustart des Servers weiter', async () => {
+    const { code } = (await (await neuerCode()).json()) as { code: string };
+    app = erstelleApp({ speicher, token: TOKEN, melde: () => {} });
+    assert.equal((await sende(LEER, TOKEN)).status, 401);
+    assert.equal((await sende(LEER, code)).status, 200);
+  });
+
+  it('weicht einem auf dem Server geänderten SYNC_TOKEN', async () => {
+    const { code } = (await (await neuerCode()).json()) as { code: string };
+    const NEU = 'vom-admin-neu-gesetztes-token';
+    const meldungen: string[] = [];
+    app = erstelleApp({ speicher, token: NEU, melde: (text) => meldungen.push(text) });
+
+    assert.equal((await sende(LEER, NEU)).status, 200);
+    assert.equal((await sende(LEER, code)).status, 401);
+    assert.equal(speicher.codeLesen(), null);
+    assert.match(meldungen.join(' '), /SYNC_TOKEN wurde geändert/);
   });
 });
 

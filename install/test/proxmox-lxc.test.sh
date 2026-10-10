@@ -175,7 +175,7 @@ pruefe "Token steht in keiner Befehlszeile" kein_aufruf 'TB_SYNC_TOKEN|[0-9a-f]{
 pruefe "kein Passwort gesetzt" kein_aufruf 'chpasswd'
 pruefe "nichts wird gelöscht" kein_aufruf '^pct destroy'
 pruefe "Adresse wird genannt" ausgabe 'http://192\.168\.1\.77'
-pruefe "Token wird am Ende gezeigt" ausgabe 'Zugangs-Token: +.*[0-9a-f]{48}'
+pruefe "Token wird am Ende gezeigt" ausgabe 'Zugangscode: +.*[0-9a-f]{48}'
 pruefe "Hinweis auf HTTPS" ausgabe 'HTTPS nötig'
 pruefe "Zusammenfassung wird gezeigt" ausgabe 'Container-ID: +105'
 
@@ -203,7 +203,7 @@ pruefe "Übergabe: ohne Sync" uebergabe '^TB_SYNC=0$'
 pruefe "Übergabe: kein Token" uebergabe '^TB_SYNC_TOKEN=$'
 pruefe "Übergabe: Port" uebergabe '^TB_PORT=8080$'
 pruefe "Adresse mit Port" ausgabe 'http://192\.168\.1\.77:8080'
-pruefe "kein Token-Abschnitt" keine_ausgabe 'Zugangs-Token'
+pruefe "kein Token-Abschnitt" keine_ausgabe 'Zugangscode'
 pruefe "Backend wird nicht geprüft" kein_aufruf 'api/health'
 
 test_titel "Umgebungsvariablen statt Optionen"

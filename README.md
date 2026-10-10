@@ -115,7 +115,7 @@ Zusammenfassung und legt erst nach Bestätigung los. Es
 2. erstellt und startet den Container (`pct create`, `pct start`),
 3. installiert darin Caddy, Node.js und die App (statischer Build),
 4. richtet auf Wunsch das Sync-Backend als systemd-Dienst ein,
-5. prüft, ob App und Backend antworten, und nennt Adresse und Zugangs-Token.
+5. prüft, ob App und Backend antworten, und nennt Adresse und Zugangscode.
 
 Bricht etwas ab, bietet das Skript an, den halb angelegten Container wieder zu entfernen.
 
@@ -148,7 +148,7 @@ TB_YES=1 TB_HOSTNAME=truhenblick TB_SYNC=0 bash proxmox-lxc.sh
 | `--ssh-key` | `TB_SSH_KEY` | – | SSH-Public-Key: Datei oder der Schlüssel selbst |
 | `--unprivileged` / `--privileged` | `TB_UNPRIVILEGED` | `1` | unprivilegierter Container |
 | `--with-sync` / `--no-sync` | `TB_SYNC` | `1` | Sync-Backend mitinstallieren |
-| `--sync-token` | `TB_SYNC_TOKEN` | wird erzeugt | Zugangs-Token, mindestens 16 Zeichen |
+| `--sync-token` | `TB_SYNC_TOKEN` | wird erzeugt | Zugangscode, mindestens 16 Zeichen |
 | `--port` | `TB_PORT` | `80` | Port der Web-App |
 | `--repo`, `--branch` | `TB_REPO`, `TB_BRANCH` | dieses Repository, `main` | Quelle der Installation |
 | `--yes` | `TB_YES` | `0` | keine Rückfragen |
@@ -203,9 +203,10 @@ Truhenblick ist fertig installiert.
   Update:         pct exec 105 -- truhenblick-update
 
   Abgleich zwischen Geräten
-  Zugangs-Token:  e5e08964d85871f1f0f95bf3457ab001e3d31633614f0f2f
+  Zugangscode:    e5e08964d85871f1f0f95bf3457ab001e3d31633614f0f2f
   In der App unter Einstellungen → „Abgleich zwischen Geräten“ eintragen.
-  Das Token steht auch im Container in /etc/truhenblick/server.env.
+  Dort lässt er sich später auch anzeigen und neu erzeugen. Dieser Anfangscode
+  steht außerdem im Container in /etc/truhenblick/server.env.
   Datenbank:      /var/lib/truhenblick/truhenblick.sqlite (im Container)
 
   Wichtig: Für die Installation als App ist HTTPS nötig.
@@ -234,7 +235,7 @@ hat.
 | `/opt/truhenblick/app` | laufendes Sync-Backend |
 | `/var/lib/truhenblick/truhenblick.sqlite` | **Datenbank des Sync-Backends** |
 | `/var/lib/truhenblick/backups/` | automatische Sicherungen vor Updates |
-| `/etc/truhenblick/server.env` | Zugangs-Token und Einstellungen des Backends |
+| `/etc/truhenblick/server.env` | Anfangs-Zugangscode (`SYNC_TOKEN`) und Einstellungen des Backends |
 | `/usr/local/bin/truhenblick-update` | Update-Skript |
 
 Dienste: `systemctl status caddy` und `systemctl status truhenblick-server`, Meldungen mit
@@ -387,7 +388,7 @@ Server.
 
 Der Abgleich ist optional; ohne ihn arbeitet die App vollständig lokal.
 
-- **Einrichten:** Auf dem ersten Gerät unter *Einstellungen → Abgleich zwischen Geräten* Adresse und Token
+- **Einrichten:** Auf dem ersten Gerät unter *Einstellungen → Abgleich zwischen Geräten* Adresse und Zugangscode
   eintragen. Auf jedem weiteren Gerät im Einrichtungsassistenten *„Schon eine Truhe auf einem anderen Gerät?“*
   aufklappen – die vorhandene Truhe erscheint dann von selbst.
 - **Offline-first:** Jede Änderung wird sofort lokal gespeichert und übertragen, sobald der Server erreichbar
@@ -395,16 +396,40 @@ Der Abgleich ist optional; ohne ihn arbeitet die App vollständig lokal.
 - **Konflikte:** Ändern zwei Geräte denselben Artikel, gewinnt die **spätere Änderung** (Zeitstempel
   `geaendertAm`). Das gilt für den ganzen Artikel, nicht feldweise. Die Uhren der Geräte sollten deshalb
   ungefähr stimmen.
-- **Zugang:** ein gemeinsames Token für den Haushalt (`SYNC_TOKEN`, mindestens 16 Zeichen), übertragen als
-  `Authorization: Bearer …`. Nach zehn Fehlversuchen ist eine Adresse zehn Minuten gesperrt. Das Token gehört
-  nur über HTTPS ins Internet.
-- **Schnittstelle:** `GET /api/health` (ohne Anmeldung) und `POST /api/sync`.
+- **Zugang:** ein gemeinsamer Zugangscode für den Haushalt, übertragen als `Authorization: Bearer …`. Nach zehn
+  Fehlversuchen ist eine Adresse zehn Minuten gesperrt. Der Code gehört nur über HTTPS ins Internet.
+- **Schnittstelle:** `GET /api/health` (ohne Anmeldung), `POST /api/sync` und `POST /api/code`.
+
+### Zugangscode
+
+Den **ersten** Code legt die Installation fest: Das Proxmox-Skript erzeugt ihn und zeigt ihn am Ende an, bei
+Docker steht er als `SYNC_TOKEN` in der `.env`. Im Container lässt er sich nachlesen:
+
+```bash
+pct exec <ID> -- grep SYNC_TOKEN /etc/truhenblick/server.env
+```
+
+Danach geht alles in der App, unter *Einstellungen → Abgleich zwischen Geräten → Zugangscode*:
+
+- **Code anzeigen** – auf jedem verbundenen Gerät, zum Abtippen auf dem nächsten.
+- **Neuen Code erzeugen** – der Server vergibt einen neuen, gut abtippbaren Code
+  (Form `k7m2-9xqp-4hrt-w3vn-8dzj`). Der bisherige gilt sofort nicht mehr; die anderen Geräte fragen beim
+  nächsten Abgleich nach dem neuen und gleichen danach normal weiter ab. Ihre Daten bleiben erhalten.
+
+Ein Gerät, das noch nie verbunden war, kann den Code nicht anzeigen – sonst könnte ihn jeder lesen, der die
+Adresse kennt.
+
+Auf dem Server liegt von einem in der App erzeugten Code nur eine Prüfsumme (in der SQLite-Datenbank).
+**Kennt kein Gerät mehr den Code**, setzt du ihn von der Serverseite zurück: in `/etc/truhenblick/server.env`
+(bei Docker in der `.env`) bei `SYNC_TOKEN` einen **neuen** Wert eintragen und den Dienst neu starten
+(`systemctl restart truhenblick-server` bzw. `docker compose --profile sync up -d`). Ein geänderter
+`SYNC_TOKEN` hat immer Vorrang vor einem in der App erzeugten Code.
 
 Einstellungen des Backends (Umgebungsvariablen):
 
 | Variable | Standard | Bedeutung |
 | --- | --- | --- |
-| `SYNC_TOKEN` | – (Pflicht) | Zugangs-Token |
+| `SYNC_TOKEN` | – (Pflicht) | Zugangscode, mit dem der Server startet (siehe oben) |
 | `PORT` | `3000` | Port |
 | `HOST` | `0.0.0.0` | Adresse, auf der gelauscht wird |
 | `DATA_DIR` | `./data` | Verzeichnis der SQLite-Datenbank |

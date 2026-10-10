@@ -2,12 +2,14 @@ import { useSyncExternalStore } from 'react';
 import { beiAenderung } from '../db/repo.ts';
 import {
   entferneKonfig,
+  erneuereCode,
   ladeKonfig,
   letzterErfolg,
   normalisiereUrl,
   speichereKonfig,
   SyncFehler,
   synchronisiere,
+  wechsleCode,
   type SyncKonfig,
 } from './client.ts';
 
@@ -17,17 +19,29 @@ export interface SyncStatus {
   url: string;
   letzterErfolg: string | null;
   fehler: string | null;
+  /** Bei „token“ gilt der hinterlegte Zugangscode nicht mehr – das Gerät braucht den neuen. */
+  fehlerArt: SyncFehler['art'] | null;
 }
 
 const NACH_AENDERUNG_MS = 1500;
 const REGELMAESSIG_MS = 60_000;
 
-let status: SyncStatus = { zustand: 'aus', url: '', letzterErfolg: null, fehler: null };
+let status: SyncStatus = { zustand: 'aus', url: '', letzterErfolg: null, fehler: null, fehlerArt: null };
 const lauscher = new Set<() => void>();
 
 function setze(teil: Partial<SyncStatus>): void {
   status = { ...status, ...teil };
   for (const fn of lauscher) fn();
+}
+
+function meldeFehler(fehler: unknown): void {
+  const bekannt = fehler instanceof SyncFehler;
+  const text = bekannt ? fehler.message : 'Der Abgleich ist fehlgeschlagen.';
+  setze({
+    zustand: 'fehler',
+    fehler: navigator.onLine ? text : 'Keine Internetverbindung – der Abgleich folgt automatisch.',
+    fehlerArt: bekannt ? fehler.art : 'server',
+  });
 }
 
 let laeuft: Promise<void> | null = null;
@@ -45,16 +59,15 @@ export function gleicheAb(): Promise<void> {
       do {
         nochmal = false;
         if (!(await ladeKonfig())) {
-          setze({ zustand: 'aus', url: '', fehler: null, letzterErfolg: null });
+          setze({ zustand: 'aus', url: '', fehler: null, fehlerArt: null, letzterErfolg: null });
           return;
         }
         setze({ zustand: 'laeuft' });
         await synchronisiere();
-        setze({ zustand: 'bereit', fehler: null, letzterErfolg: await letzterErfolg() });
+        setze({ zustand: 'bereit', fehler: null, fehlerArt: null, letzterErfolg: await letzterErfolg() });
       } while (nochmal);
     } catch (fehler) {
-      const text = fehler instanceof SyncFehler ? fehler.message : 'Der Abgleich ist fehlgeschlagen.';
-      setze({ zustand: 'fehler', fehler: navigator.onLine ? text : 'Keine Internetverbindung – der Abgleich folgt automatisch.' });
+      meldeFehler(fehler);
     } finally {
       laeuft = null;
     }
@@ -105,7 +118,7 @@ export async function verbinde(eingabe: SyncKonfig): Promise<void> {
   const vorher = await ladeKonfig();
   const konfig = { url: normalisiereUrl(eingabe.url), token: eingabe.token.trim() };
   await speichereKonfig(konfig);
-  setze({ zustand: 'laeuft', url: konfig.url, fehler: null });
+  setze({ zustand: 'laeuft', url: konfig.url, fehler: null, fehlerArt: null });
   try {
     await synchronisiere();
     setze({ zustand: 'bereit', letzterErfolg: await letzterErfolg() });
@@ -119,7 +132,36 @@ export async function verbinde(eingabe: SyncKonfig): Promise<void> {
 
 export async function trenne(): Promise<void> {
   await entferneKonfig();
-  setze({ zustand: 'aus', url: '', fehler: null, letzterErfolg: null });
+  setze({ zustand: 'aus', url: '', fehler: null, fehlerArt: null, letzterErfolg: null });
+}
+
+/** Wartet einen laufenden Abgleich ab, damit sich zwei nicht in die Quere kommen. */
+async function ruhe(): Promise<void> {
+  if (laeuft) await laeuft.catch(() => undefined);
+}
+
+/**
+ * Erzeugt einen neuen Zugangscode und liefert ihn. Der bisherige gilt sofort nicht mehr –
+ * alle anderen Geräte brauchen danach den neuen.
+ */
+export async function neuerCode(): Promise<string> {
+  await ruhe();
+  const code = await erneuereCode();
+  void gleicheAb();
+  return code;
+}
+
+/** Hinterlegt den Code, der auf einem anderen Gerät neu erzeugt wurde. Wirft, wenn er nicht stimmt. */
+export async function setzeCode(code: string): Promise<void> {
+  await ruhe();
+  setze({ zustand: 'laeuft' });
+  try {
+    await wechsleCode(code);
+    setze({ zustand: 'bereit', fehler: null, fehlerArt: null, letzterErfolg: await letzterErfolg() });
+  } catch (fehler) {
+    meldeFehler(fehler);
+    throw fehler;
+  }
 }
 
 export function useSyncStatus(): SyncStatus {

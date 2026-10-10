@@ -75,6 +75,7 @@ case "$name" in
       push) cp "$3" "$MOCK_ABLAGE/install.env" ;;
       exec)
         shift 3   # exec <id> --
+        while [[ "${1:-}" == env || "${1:-}" == *=* ]]; do shift; done   # vorangestelltes „env VAR=wert“ überspringen
         case "$*" in
           "ip -4 -o addr show dev eth0 scope global")
             fehler keine-ip && exit 0
@@ -165,8 +166,8 @@ pruefe "1 Kern, 512 MB" aufruf '^pct create .*--cores 1 --memory 512 --swap 1024
 pruefe "DHCP auf vmbr0" aufruf '^pct create .*--net0 name=eth0,bridge=vmbr0,ip=dhcp '
 pruefe "unprivilegiert mit nesting" aufruf '^pct create .*--unprivileged 1 --features nesting=1'
 pruefe "Container wird gestartet" aufruf '^pct start 105'
-pruefe "Quellen werden geholt" aufruf '^pct exec 105 -- git clone .*--branch main https://github.com/laserjonas/Truhenblick.git /opt/truhenblick/src'
-pruefe "Einrichtung läuft im Container" aufruf '^pct exec 105 -- bash /opt/truhenblick/src/install/container-setup.sh'
+pruefe "Quellen werden geholt" aufruf '^pct exec 105 -- env LC_ALL=C.UTF-8 LANG=C.UTF-8 git clone .*--branch main https://github.com/laserjonas/Truhenblick.git /opt/truhenblick/src'
+pruefe "Einrichtung läuft im Container" aufruf '^pct exec 105 -- env LC_ALL=C.UTF-8 LANG=C.UTF-8 bash /opt/truhenblick/src/install/container-setup.sh'
 pruefe "Übergabe: Port 80" uebergabe '^TB_PORT=80$'
 pruefe "Übergabe: Sync aktiv" uebergabe '^TB_SYNC=1$'
 pruefe "Übergabe: Token wird erzeugt (48 Hex-Zeichen)" uebergabe '^TB_SYNC_TOKEN=[0-9a-f]{48}$'
@@ -197,7 +198,7 @@ pruefe "DNS" aufruf '^pct create .*--nameserver 10\.0\.0\.2'
 pruefe "SSH-Schlüssel als Datei" aufruf '^pct create .*--ssh-public-keys /tmp/truhenblick-key-'
 pruefe "Passwort über die Standardeingabe" grep -qx 'root:geheim123' "$MOCK_ABLAGE/chpasswd"
 pruefe "Passwort in keiner Befehlszeile" kein_aufruf 'geheim123'
-pruefe "eigenes Repo und Zweig" aufruf '^pct exec 222 -- git clone .*--branch test https://git.example/t.git'
+pruefe "eigenes Repo und Zweig" aufruf '^pct exec 222 -- env LC_ALL=C.UTF-8 LANG=C.UTF-8 git clone .*--branch test https://git.example/t.git'
 pruefe "Übergabe: ohne Sync" uebergabe '^TB_SYNC=0$'
 pruefe "Übergabe: kein Token" uebergabe '^TB_SYNC_TOKEN=$'
 pruefe "Übergabe: Port" uebergabe '^TB_PORT=8080$'
@@ -300,6 +301,21 @@ pruefe "Passwort aus der Rückfrage" grep -qx 'root:geheim123' "$MOCK_ABLAGE/chp
 pruefe "ohne Sync, Port 8443" uebergabe '^TB_PORT=8443$'
 pruefe "ohne Sync" uebergabe '^TB_SYNC=0$'
 pruefe "Zusammenfassung vor dem Anlegen" ausgabe 'Container jetzt anlegen'
+
+# Passwort: zu kurz, dann Wiederholung falsch, dann richtig (7 Vorgaben, DHCP ja, VLAN leer davor)
+EINGABEN='\n\n\n\n\n\n\n\n\nkurz\ngeheim123\nanders999\ngeheim123\ngeheim123\n\n\n\n\nj\n'
+starte --
+pruefe "Passwort-Rückfrage: endet erfolgreich" code_ist 0
+pruefe "Passwort-Rückfrage: zu kurzes Passwort wird abgelehnt" ausgabe 'mindestens 5 Zeichen'
+pruefe "Passwort-Rückfrage: abweichende Wiederholung wird abgelehnt" ausgabe 'stimmen nicht überein'
+pruefe "Passwort-Rückfrage: das bestätigte Passwort wird gesetzt" grep -qx 'root:geheim123' "$MOCK_ABLAGE/chpasswd"
+
+# Mit --password wird nicht noch einmal nach dem Passwort gefragt
+EINGABEN='\n\n\n\n\n\n\n\n\n\n\n\n\nj\n'
+starte -- --password vorab-gesetzt
+pruefe "übergebenes Passwort: endet erfolgreich" code_ist 0
+pruefe "übergebenes Passwort: keine Rückfrage" keine_ausgabe 'Root-Passwort für den Container'
+pruefe "übergebenes Passwort: wird gesetzt" grep -qx 'root:vorab-gesetzt' "$MOCK_ABLAGE/chpasswd"
 
 # Tippfehler in der IP: Gateway passt nicht → beide Angaben werden erneut erfragt
 EINGABEN='\n\n\n\n\n\n\nn\n172.168.178.220/24\n192.168.178.1\n192.168.178.220/24\n\n\n\n\n\n\n\nj\n'

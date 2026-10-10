@@ -160,7 +160,7 @@ Ohne Passwort und SSH-Schlüssel ist der Container nur über `pct enter <ID>` au
 
 ```text
 Truhenblick – Installation als LXC-Container
-  • pve-manager/8.3.0 (running kernel: 6.8.12-4-pve)
+  • pve-manager/9.2.10/43df2e01f27a1a19 (running kernel: 7.0.14-12-pve)
 
 Zusammenfassung
   Hostname:        truhenblick
@@ -175,8 +175,7 @@ Zusammenfassung
   Quelle:          https://github.com/laserjonas/Truhenblick.git (main)
 
 [1/5] Debian-12-Template bereitstellen
-  • Lade debian-12-standard_12.12-1_amd64.tar.zst nach local …
-  ✓ Template heruntergeladen
+  ✓ Template ist vorhanden: debian-12-standard_12.12-1_amd64.tar.zst
 
 [2/5] Container 105 anlegen
   ✓ Container angelegt
@@ -213,10 +212,16 @@ Truhenblick ist fertig installiert.
   …
 ```
 
-Die Ausgabe stammt aus dem Testlauf mit nachgebildeten Proxmox-Befehlen (siehe
-[Stand der Prüfungen](#stand-der-prüfungen)); IP-Adresse und Token sind Beispiele.
+IP-Adresse und Token sind Beispiele. Auf einem Testsystem dauerte der ganze Lauf knapp zwei Minuten.
 
 </details>
+
+**Arbeitsspeicher:** 512 MB reichen für den Betrieb locker (App und Backend brauchen zusammen rund 130 MB).
+Beim Bauen der App wird das Limit aber ausgeschöpft und etwas Swap benutzt – den Swap deshalb nicht auf 0 setzen.
+
+**Statische IP:** Das Skript prüft vor dem Anlegen, ob das Gateway im Netz der Adresse liegt. Ein Tippfehler wie
+`172.168.178.50/24` mit Gateway `192.168.178.1` fällt so sofort auf und nicht erst, wenn der Container kein Internet
+hat.
 
 **Was im Container wo liegt**
 
@@ -441,11 +446,19 @@ Was bisher wie geprüft wurde (Stand: Version 0.1.0):
 
 - **App:** automatisierte Tests sowie Durchläufe im Browser (Chrome, Handy- und Desktop-Breite, hell und dunkel)
   einschließlich Offline-Betrieb und Update-Hinweis am Produktions-Build.
-- **Abgleich:** Ende-zu-Ende mit zwei getrennten Browsern gegen das laufende Backend.
-- **Proxmox-Skript:** nur mit nachgebildeten Befehlen getestet, **noch nicht auf einem echten Proxmox-Host**.
-  Dasselbe gilt für `container-setup.sh` und `truhenblick-update`, die bisher nur auf Syntax geprüft und
-  durchgesehen sind.
-- **Docker-Images:** geschrieben, aber **noch nicht gebaut und gestartet**.
+- **Abgleich:** Ende-zu-Ende mit zwei getrennten Browsern – gegen das lokal gestartete Backend, gegen den
+  Docker-Stack und gegen einen Proxmox-Container.
+- **Proxmox-Skript:** auf einem echten Host getestet (Proxmox VE 9.2, Debian-12-Template, unprivilegierter
+  Container): ohne Rückfragen, mit Rückfragen im Terminal und über die whiptail-Dialoge; DHCP und statische IP;
+  mit und ohne Sync-Backend; Abbruch durch Fehler und durch Strg+C mit anschließendem Aufräumen.
+  `truhenblick-update` wurde dort mit echten neuen Versionen, mit eigenen Anpassungen an den Quellen und über
+  `pct exec` geprüft. **Nicht** getestet: privilegierte Container, VLAN-Tags, andere Storage-Typen als LVM-Thin,
+  Proxmox VE 8 und ältere.
+- **Docker:** beide Images gebaut und als Compose-Stack gestartet (nur App, mit Sync-Backend, mit eigenem HTTPS
+  über `SITE_ADDRESS`), Daten überstehen einen Neustart. ARM64 wurde unter Emulation gebaut und gestartet,
+  **nicht** auf einem echten Raspberry Pi. Das Abholen eines echten Zertifikats (Let's Encrypt) ist ungetestet.
+- **Ohne Container** (`container-setup.sh` direkt auf einem Server): nur im Proxmox-Container gelaufen,
+  nicht auf Ubuntu.
 - **iOS und Android:** noch nicht auf echten Geräten ausprobiert. Eigene iOS-Startbilder (Splash-Images) gibt es
   nicht – beim Start zeigt iOS kurz eine einfarbige Fläche.
 

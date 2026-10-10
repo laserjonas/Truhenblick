@@ -222,8 +222,10 @@ still() {
 }
 
 # Führt einen Befehl im Container aus (Ausgabe ins Protokoll).
+# Mit fester Sprachumgebung: Die des Hosts gibt es im frischen Container meist nicht,
+# was sonst jede Paketinstallation mit Locale-Warnungen quittiert.
 im_ct() {
-  still pct exec "$CTID" -- "$@"
+  still pct exec "$CTID" -- env LC_ALL=C.UTF-8 LANG=C.UTF-8 "$@"
 }
 
 # ------------------------------------------------------------------ Voraussetzungen
@@ -463,18 +465,21 @@ if [[ "$OHNE_RUECKFRAGE" != "1" ]]; then
   fi
   frage_bis VLAN "VLAN-Tag (leer = keines)" "Bitte eine Zahl von 1 bis 4094 eingeben oder leer lassen." pruefe_vlan
 
-  while true; do
-    PASSWORT="$(frage_geheim "Root-Passwort für den Container (leer = keines)")" || exit $?
-    [[ -z "$PASSWORT" ]] && break
-    if [[ ${#PASSWORT} -lt 5 ]]; then
-      hinweis "Das Passwort muss mindestens 5 Zeichen lang sein."
-      continue
-    fi
-    WIEDERHOLUNG="$(frage_geheim "Passwort wiederholen")" || exit $?
-    [[ "$WIEDERHOLUNG" == "$PASSWORT" ]] && break
-    hinweis "Die Passwörter stimmen nicht überein."
-  done
-  unset WIEDERHOLUNG
+  # Ein per Option oder Variable übergebenes Passwort gilt – dann wird nicht noch einmal gefragt.
+  if [[ -z "$PASSWORT" ]]; then
+    while true; do
+      PASSWORT="$(frage_geheim "Root-Passwort für den Container (leer = keines)")" || exit $?
+      [[ -z "$PASSWORT" ]] && break
+      if [[ ${#PASSWORT} -lt 5 ]]; then
+        hinweis "Das Passwort muss mindestens 5 Zeichen lang sein."
+        continue
+      fi
+      WIEDERHOLUNG="$(frage_geheim "Passwort wiederholen")" || exit $?
+      [[ "$WIEDERHOLUNG" == "$PASSWORT" ]] && break
+      hinweis "Die Passwörter stimmen nicht überein."
+    done
+    unset WIEDERHOLUNG
+  fi
   SSH_KEY="$(frage_text "SSH-Public-Key für root: Datei oder Schlüssel (leer = keiner)" "$SSH_KEY")" || exit $?
 
   if frage_janein "Unprivilegierten Container anlegen? (empfohlen)" "$([[ "$UNPRIVILEGIERT" == 1 ]] && echo j || echo n)"; then

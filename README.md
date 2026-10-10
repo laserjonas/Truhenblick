@@ -306,6 +306,12 @@ Zu beachten:
 
 Browser erlauben Service Worker – und damit Installation und Offline-Betrieb – nur über HTTPS.
 
+> **Über `http://` läuft die App nur, solange das Gerät den Server erreicht.** Das gilt auch, wenn man sie auf
+> dem Handy über „Zum Home-Bildschirm“ ablegt: Über `http://<IP>` entsteht dabei nur eine Verknüpfung, die bei
+> jedem Start vom Server lädt – unterwegs bleibt sie leer. Erst über `https://` speichert das Gerät die App und
+> startet sie ohne Netz; abgeglichen wird, sobald der Server wieder erreichbar ist. Die App weist über `http://`
+> selbst darauf hin.
+
 **Unter welcher Adresse der Server erreichbar ist, stellst du in der App ein:** *Einstellungen → Server →
 Erreichbarkeit*. Am Server selbst – Caddy-Datei, `.env` – ist dafür nichts zu ändern. Truhenblick antwortet
 auf Port 80 unter jedem Namen, über die IP im Heimnetz genauso wie über den Namen aus dem Proxy.

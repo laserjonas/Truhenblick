@@ -1,15 +1,50 @@
 import { useState } from 'react';
 import { installiere, useInstallation } from '../hooks/useInstallation.ts';
+import { useAnmeldung } from '../sync/anmeldung.ts';
 import { SchliessenIcon } from './Icons.tsx';
 
 const MERKER = 'truhenblick.installhinweis-ausgeblendet';
+const MERKER_HTTP = 'truhenblick.httphinweis-ausgeblendet';
 
-function ausgeblendet(): boolean {
+function ausgeblendet(merker: string): boolean {
   try {
-    return localStorage.getItem(MERKER) === '1';
+    return localStorage.getItem(merker) === '1';
   } catch {
     return false;
   }
+}
+
+function merke(merker: string): void {
+  try {
+    localStorage.setItem(merker, '1');
+  } catch {
+    // Ohne Speicher erscheint der Hinweis beim nächsten Start eben wieder.
+  }
+}
+
+/**
+ * Über http:// gibt es keinen Service Worker: Die App lädt bei jedem Start vom Server und läuft
+ * nur, solange der erreichbar ist. Ein Symbol auf dem Home-Bildschirm ändert daran nichts.
+ */
+export function OhneHttps({ adresse, installiert }: { adresse: string | null; installiert: boolean }) {
+  return (
+    <>
+      Sie wurde über http:// geöffnet und lädt deshalb bei jedem Start vom Server – unterwegs, ohne Verbindung zu
+      ihm, startet sie nicht. Ohne Netz läuft sie nur über https://
+      {adresse ? (
+        <>
+          , also unter{' '}
+          <a className="font-semibold wrap-anywhere underline" href={`https://${adresse}`}>
+            https://{adresse}
+          </a>
+          .
+        </>
+      ) : (
+        '. Wie der Server so erreichbar wird, steht unter Einstellungen → Server.'
+      )}
+      {installiert && ' Das Symbol auf dem Home-Bildschirm ist bis dahin nur eine Verknüpfung.'}
+    </>
+  );
 }
 
 /** Das Teilen-Symbol von iOS (Kasten mit Pfeil nach oben). */
@@ -48,18 +83,42 @@ export function IosAnleitung() {
  * oder erklärt den Weg über „Teilen“ (iOS). Lässt sich dauerhaft ausblenden.
  */
 export function InstallHinweis() {
-  const { installiert, angebot, ios } = useInstallation();
-  const [weg, setWeg] = useState(ausgeblendet);
+  const { installiert, angebot, ios, sicher } = useInstallation();
+  const adresse = useAnmeldung().server?.adresse ?? null;
+  const [weg, setWeg] = useState(() => ausgeblendet(MERKER));
+  const [httpWeg, setHttpWeg] = useState(() => ausgeblendet(MERKER_HTTP));
+
+  // Über http:// nicht zur Installation auffordern – sie brächte nicht, was man von ihr erwartet.
+  if (!sicher) {
+    if (httpWeg) return null;
+    return (
+      <aside className="border-bald-rand bg-bald-bg text-bald-text flex items-start gap-2 rounded-2xl border py-2 pr-1 pl-4" aria-label="Kein Betrieb ohne Netz">
+        <div className="min-w-0 flex-1 py-1.5">
+          <p className="font-semibold">Diese App läuft nur mit Verbindung zum Server</p>
+          <p className="mt-0.5 text-sm">
+            <OhneHttps adresse={adresse} installiert={installiert} />
+          </p>
+        </div>
+        <button
+          type="button"
+          className="rund"
+          aria-label="Hinweis ausblenden"
+          onClick={() => {
+            setHttpWeg(true);
+            merke(MERKER_HTTP);
+          }}
+        >
+          <SchliessenIcon width={20} height={20} />
+        </button>
+      </aside>
+    );
+  }
 
   if (weg || installiert || (!angebot && !ios)) return null;
 
   function ausblenden() {
     setWeg(true);
-    try {
-      localStorage.setItem(MERKER, '1');
-    } catch {
-      // Ohne Speicher erscheint der Hinweis beim nächsten Start eben wieder.
-    }
+    merke(MERKER);
   }
 
   return (

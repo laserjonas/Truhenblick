@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { IosAnleitung } from '../components/InstallHinweis.tsx';
+import { IosAnleitung, OhneHttps } from '../components/InstallHinweis.tsx';
 import { installiere, useInstallation } from '../hooks/useInstallation.ts';
 import { useAnmeldung } from '../sync/anmeldung.ts';
 import { Aktualisierung } from './Aktualisierung.tsx';
@@ -24,30 +24,20 @@ function AppInstallieren() {
   // Die in der App eingestellte Adresse des Servers (Einstellungen → Server), falls es eine gibt
   const adresse = useAnmeldung().server?.adresse ?? null;
 
-  if (installiert) return <p>✓ Truhenblick ist auf diesem Gerät installiert.</p>;
+  // Zuerst: Über http:// ist auch ein Symbol auf dem Home-Bildschirm keine installierte App.
+  if (!sicher) {
+    return (
+      <p>
+        <strong>So läuft die App nur mit Verbindung zum Server.</strong> <OhneHttps adresse={adresse} installiert={installiert} />
+      </p>
+    );
+  }
+  if (installiert) return <p>✓ Truhenblick ist auf diesem Gerät installiert und startet auch ohne Internet.</p>;
   if (angebot) {
     return (
       <button type="button" className="knopf knopf-primaer w-full" onClick={() => void installiere()}>
         Truhenblick installieren
       </button>
-    );
-  }
-  if (!sicher) {
-    return (
-      <p>
-        Zum Installieren muss Truhenblick über eine sichere Verbindung (https://) geöffnet werden. Im Browser
-        funktioniert die App trotzdem.
-        {adresse && (
-          <>
-            {' '}
-            Dieser Server ist dafür unter{' '}
-            <a className="text-akzent font-semibold break-all underline" href={`https://${adresse}`}>
-              https://{adresse}
-            </a>{' '}
-            erreichbar.
-          </>
-        )}
-      </p>
     );
   }
   if (ios) {

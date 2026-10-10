@@ -1,5 +1,5 @@
 import { eingehendeGewinnt } from '../../shared/sync.ts';
-import type { Artikel, Bereich, SyncAnfrage, SyncAntwort, SyncDoc } from '../../shared/types.ts';
+import type { Artikel, Bereich, SyncAnfrage, SyncAntwort, SyncDoc, UpdateStand } from '../../shared/types.ts';
 import { bereinigeArtikel, bereinigeBereich, istArtikel, istBereich } from '../../shared/validierung.ts';
 import { db, metaLesen, metaSchreiben, ohneLokal, type Lokal } from '../db/db.ts';
 
@@ -69,14 +69,20 @@ export type Sende = (konfig: SyncKonfig, anfrage: SyncAnfrage) => Promise<SyncAn
 
 const KEIN_SERVER = 'Unter dieser Adresse antwortet kein Truhenblick-Server.';
 
-/** POST an das Backend; übersetzt Fehler in verständliche Meldungen. `bei404` ersetzt die Meldung für „unbekannt“. */
-async function post(konfig: SyncKonfig, pfad: string, koerper: unknown, bei404?: string): Promise<Record<string, unknown>> {
+/**
+ * Anfrage an das Backend; übersetzt Fehler in verständliche Meldungen.
+ * Mit `koerper` wird per POST gesendet, sonst per GET. `bei404` ersetzt die Meldung für „unbekannt“.
+ */
+async function rufe(konfig: SyncKonfig, pfad: string, koerper?: unknown, bei404?: string): Promise<Record<string, unknown>> {
   let antwort: Response;
   try {
     antwort = await fetch(`${konfig.url}${pfad}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${konfig.token}` },
-      body: JSON.stringify(koerper),
+      method: koerper === undefined ? 'GET' : 'POST',
+      headers: {
+        Authorization: `Bearer ${konfig.token}`,
+        ...(koerper === undefined ? {} : { 'Content-Type': 'application/json' }),
+      },
+      body: koerper === undefined ? undefined : JSON.stringify(koerper),
       cache: 'no-store',
       signal: AbortSignal.timeout(20_000),
     });
@@ -102,7 +108,7 @@ async function post(konfig: SyncKonfig, pfad: string, koerper: unknown, bei404?:
 
 /** Schickt eine Sync-Anfrage an den Server. */
 export const sendeAnfrage: Sende = async (konfig, anfrage) => {
-  const daten = await post(konfig, '/api/sync', anfrage);
+  const daten = await rufe(konfig, '/api/sync', anfrage);
   if (
     typeof daten.serverId !== 'string' ||
     typeof daten.rev !== 'number' ||
@@ -118,7 +124,7 @@ export type FordereCode = (konfig: SyncKonfig) => Promise<string>;
 
 /** Lässt den Server einen neuen Zugangscode erzeugen; der bisherige gilt danach nicht mehr. */
 export const fordereNeuenCode: FordereCode = async (konfig) => {
-  const daten = await post(
+  const daten = await rufe(
     konfig,
     '/api/code',
     {},
@@ -159,6 +165,48 @@ export async function wechsleCode(code: string, sende: Sende = sendeAnfrage): Pr
     if (fehler instanceof SyncFehler && fehler.art === 'token') await metaSchreiben(KONFIG, konfig);
     throw fehler;
   }
+}
+
+// ---------------------------------------------------------------- Aktualisierung des Servers
+
+const SERVER_ZU_ALT =
+  'Dieser Server kann sich noch nicht aus der App aktualisieren. Bitte einmal von Hand aktualisieren (truhenblick-update).';
+
+/** Prüft die Antwort von GET /api/update. */
+export function leseUpdateStand(daten: Record<string, unknown>): UpdateStand {
+  if (typeof daten.moeglich !== 'boolean' || typeof daten.laeuft !== 'boolean') throw new SyncFehler('server', KEIN_SERVER);
+  const text = (x: unknown) => (typeof x === 'string' ? x : null);
+  const l = daten.letztes as { zustand?: unknown; beendet?: unknown; meldung?: unknown } | null | undefined;
+  return {
+    moeglich: daten.moeglich,
+    installiert: text(daten.installiert),
+    verfuegbar: text(daten.verfuegbar),
+    neu: typeof daten.neu === 'boolean' ? daten.neu : null,
+    geprueft: text(daten.geprueft),
+    laeuft: daten.laeuft,
+    letztes:
+      l && (l.zustand === 'fertig' || l.zustand === 'fehler') && typeof l.beendet === 'string' && typeof l.meldung === 'string'
+        ? { zustand: l.zustand, beendet: l.beendet, meldung: l.meldung }
+        : null,
+    protokoll: text(daten.protokoll),
+  };
+}
+
+/**
+ * Stand der Server-Aktualisierung. `pruefen` lässt den Server sofort bei der Quelle nachsehen.
+ * Liefert null, wenn dieses Gerät mit keinem Server verbunden ist.
+ */
+export async function holeUpdateStand(pruefen = false): Promise<UpdateStand | null> {
+  const konfig = await ladeKonfig();
+  if (!konfig) return null;
+  return leseUpdateStand(await rufe(konfig, `/api/update${pruefen ? '?pruefen=1' : ''}`, undefined, SERVER_ZU_ALT));
+}
+
+/** Stößt das Update des Servers an. Ausgeführt wird es dort von einem eigenen Dienst. */
+export async function starteServerUpdate(): Promise<void> {
+  const konfig = await ladeKonfig();
+  if (!konfig) throw new SyncFehler('server', 'Dieses Gerät ist mit keinem Server verbunden.');
+  await rufe(konfig, '/api/update', {}, SERVER_ZU_ALT);
 }
 
 interface Tabelle<T extends SyncDoc> {

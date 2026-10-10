@@ -4,6 +4,7 @@ import { serve } from '@hono/node-server';
 import { erstelleApp } from './app.ts';
 import { KonfigFehler, leseKonfig } from './konfig.ts';
 import { oeffneSpeicher } from './speicher.ts';
+import { erstelleUpdateDienst, STANDARD_ORTE } from './update.ts';
 
 function version(): string {
   try {
@@ -29,7 +30,13 @@ function start(): void {
   mkdirSync(konfig.datenVerzeichnis, { recursive: true });
   const datei = join(konfig.datenVerzeichnis, 'truhenblick.sqlite');
   const speicher = oeffneSpeicher(datei);
-  const app = erstelleApp({ speicher, token: konfig.token, corsOrigins: konfig.corsOrigins, version: version() });
+  const app = erstelleApp({
+    speicher,
+    token: konfig.token,
+    corsOrigins: konfig.corsOrigins,
+    version: version(),
+    update: erstelleUpdateDienst(STANDARD_ORTE(konfig.datenVerzeichnis)),
+  });
 
   const server = serve({ fetch: app.fetch, port: konfig.port, hostname: konfig.host }, (info) => {
     const stand = speicher.stand();

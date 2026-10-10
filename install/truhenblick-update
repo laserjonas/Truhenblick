@@ -6,6 +6,9 @@
 #   truhenblick-update --force    auch ohne neue Version neu bauen und einrichten
 #   truhenblick-update --check    nur prüfen, ob es eine neue Version gibt
 #
+# Dasselbe lässt sich in der App anstoßen (Einstellungen → Aktualisierung); dann ruft
+# ein systemd-Dienst dieses Skript mit --aus-app auf.
+#
 # Ablauf: neue Quellen holen → Datenbank sichern → bauen → erst dann ersetzen.
 # Schlägt der Build fehl, läuft die bisherige Version unverändert weiter.
 # Die Daten des Sync-Backends (/var/lib/truhenblick) bleiben immer erhalten.
@@ -23,6 +26,12 @@ ETC=/etc/truhenblick
 KONF="$ETC/install.conf"
 DIENST=truhenblick-server
 BEHALTEN=10
+# Für Updates aus der App: Hier legt das Skript Fortschritt und Protokoll ab. Das Verzeichnis
+# gehört root; das Backend darf es nur lesen. Angestoßen wird über die Anfragedatei.
+STATUS_VERZEICHNIS=/var/lib/truhenblick-update
+STATUS_DATEI="$STATUS_VERZEICHNIS/status.json"
+PROTOKOLL="$STATUS_VERZEICHNIS/update.log"
+ANFRAGE="$DATEN/update-anfrage"
 
 if [[ -t 1 ]]; then
   FETT=$'\e[1m'; ROT=$'\e[31m'; GRUEN=$'\e[32m'; GELB=$'\e[33m'; AUS=$'\e[0m'
@@ -36,12 +45,14 @@ abbruch() { printf '%sFehler:%s %s\n' "$ROT" "$AUS" "$*" >&2; exit 1; }
 
 ERZWINGEN=0
 NUR_PRUEFEN=0
+AUS_APP=0
 for arg in "$@"; do
   case "$arg" in
     --force) ERZWINGEN=1 ;;
     --check) NUR_PRUEFEN=1 ;;
+    --aus-app) AUS_APP=1 ;;
     -h | --help)
-      sed -n '3,12p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '3,15p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *) abbruch "Unbekannte Option: $arg (siehe truhenblick-update --help)" ;;
@@ -56,6 +67,37 @@ TB_SYNC=0
 # shellcheck disable=SC1090
 [[ -f "$KONF" ]] && . "$KONF"
 
+# ------------------------------------------------------------------ Aus der App angestoßen
+
+zeit() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+GESTARTET="$(zeit)"
+VORHER=""
+
+# schreibe_status ZUSTAND MELDUNG – nur im Modus --aus-app.
+# Die Meldungen sind feste Texte ohne Anführungszeichen, damit gültiges JSON entsteht.
+schreibe_status() {
+  [[ "$AUS_APP" == "1" ]] || return 0
+  local beendet=null
+  [[ "$1" == laeuft ]] || beendet="\"$(zeit)\""
+  printf '{"zustand":"%s","gestartet":"%s","beendet":%s,"vorher":"%s","meldung":"%s"}\n' \
+    "$1" "$GESTARTET" "$beendet" "$VORHER" "$2" >"$STATUS_DATEI.neu"
+  chgrp truhenblick "$STATUS_DATEI.neu" 2>/dev/null || true
+  chmod 640 "$STATUS_DATEI.neu"
+  mv -f "$STATUS_DATEI.neu" "$STATUS_DATEI"
+}
+
+if [[ "$AUS_APP" == "1" ]]; then
+  install -d -m 750 -o root -g truhenblick "$STATUS_VERZEICHNIS"
+  # Die Anfrage ist erledigt, sobald wir laufen. Ihr Inhalt wird nie gelesen.
+  rm -f "$ANFRAGE"
+  # Alles Weitere ins Protokoll, das die App nach einem Fehler anzeigt.
+  exec >"$PROTOKOLL" 2>&1
+  chgrp truhenblick "$PROTOKOLL" 2>/dev/null || true
+  chmod 640 "$PROTOKOLL"
+  trap 'code=$?; if [[ $code -ne 0 ]]; then schreibe_status fehler "Das Update ist fehlgeschlagen. Die bisherige Version läuft weiter."; fi' EXIT
+  schreibe_status laeuft "Update läuft."
+fi
+
 version_von() {
   git -C "$QUELLE" show "$1:package.json" 2>/dev/null | sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' | head -n1
 }
@@ -68,9 +110,11 @@ git -C "$QUELLE" fetch --quiet --depth 1 origin "$TB_BRANCH" ||
 
 NEU="$(git -C "$QUELLE" rev-parse FETCH_HEAD)"
 INSTALLIERT="$(cat "$ETC/version" 2>/dev/null || echo unbekannt)"
+VORHER="$INSTALLIERT"
 
 if [[ "$NEU" == "$INSTALLIERT" && "$ERZWINGEN" == "0" ]]; then
   ok "Truhenblick $(version_von "$NEU") ist bereits aktuell."
+  schreibe_status fertig "Truhenblick ist bereits aktuell."
   exit 0
 fi
 if [[ "$NEU" == "$INSTALLIERT" ]]; then
@@ -138,5 +182,7 @@ fi
 
 # Das Einrichtungsskript der NEUEN Version übernimmt den Rest (bauen, ausliefern, Dienst neu starten).
 bash "$QUELLE/install/container-setup.sh" --update
+
+schreibe_status fertig "Update installiert."
 
 printf '\n%sUpdate abgeschlossen.%s Geöffnete Apps zeigen beim nächsten Start den Hinweis „Neue Version“.\n' "$FETT$GRUEN" "$AUS"

@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { IosAnleitung } from '../components/InstallHinweis.tsx';
 import { installiere, useInstallation } from '../hooks/useInstallation.ts';
+import { Aktualisierung } from './Aktualisierung.tsx';
 import { Datensicherung } from './Datensicherung.tsx';
 import { SyncEinstellungen } from './SyncEinstellungen.tsx';
 import { TruheBearbeiten } from './TruheBearbeiten.tsx';
@@ -73,6 +74,13 @@ export function Einstellungen() {
         hinweis="Optional: Mit einem eigenen Truhenblick-Server sehen alle Geräte im Haushalt denselben Stand. Ohne Server bleibt alles auf diesem Gerät."
       >
         <SyncEinstellungen />
+      </Abschnitt>
+
+      <Abschnitt
+        titel="Aktualisierung"
+        hinweis="Neue Versionen der App laden und – wenn dieses Gerät verbunden ist – den Server aktualisieren."
+      >
+        <Aktualisierung />
       </Abschnitt>
 
       <Abschnitt titel="App installieren" hinweis="Als App startet Truhenblick vom Home-Bildschirm und funktioniert auch ohne Internet.">

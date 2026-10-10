@@ -18,6 +18,7 @@
 #   TB_SYNC_TOKEN  Zugangscode; leer = behalten bzw. neu erzeugen
 #   TB_REPO        Git-Adresse der Quellen
 #   TB_BRANCH      Zweig                                    (main)
+#   TB_APP_UPDATE  1 = Updates lassen sich in der App anstoßen, 0 = nur von Hand (1)
 #
 # Aufruf mit --update: Systempakete werden nur ergänzt, wenn etwas fehlt.
 
@@ -37,6 +38,7 @@ KONF="$ETC/install.conf"
 UEBERGABE="$ETC/install.env"
 SERVER_ENV="$ETC/server.env"
 DIENST=truhenblick-server
+STATUS_VERZEICHNIS=/var/lib/truhenblick-update
 CADDYFILE=/etc/caddy/Caddyfile
 CADDY_MARKE="# Truhenblick – automatisch erzeugt."
 BACKEND_PORT=3000
@@ -68,7 +70,7 @@ command -v apt-get >/dev/null || abbruch "Dieses Skript braucht ein Debian- oder
 
 # Reihenfolge: Umgebung > Übergabedatei des Proxmox-Skripts > gespeicherte Werte > Standard
 UMGEBUNG_PORT="${TB_PORT:-}"; UMGEBUNG_SYNC="${TB_SYNC:-}"; UMGEBUNG_TOKEN="${TB_SYNC_TOKEN:-}"
-UMGEBUNG_REPO="${TB_REPO:-}"; UMGEBUNG_BRANCH="${TB_BRANCH:-}"
+UMGEBUNG_REPO="${TB_REPO:-}"; UMGEBUNG_BRANCH="${TB_BRANCH:-}"; UMGEBUNG_APP_UPDATE="${TB_APP_UPDATE:-}"
 
 # shellcheck disable=SC1090
 [[ -f "$KONF" ]] && . "$KONF"
@@ -83,9 +85,11 @@ TB_SYNC="${UMGEBUNG_SYNC:-${TB_SYNC:-0}}"
 TB_SYNC_TOKEN="${UMGEBUNG_TOKEN:-${TB_SYNC_TOKEN:-}}"
 TB_REPO="${UMGEBUNG_REPO:-${TB_REPO:-$REPO_STANDARD}}"
 TB_BRANCH="${UMGEBUNG_BRANCH:-${TB_BRANCH:-main}}"
+TB_APP_UPDATE="${UMGEBUNG_APP_UPDATE:-${TB_APP_UPDATE:-1}}"
 
 [[ "$TB_PORT" =~ ^[0-9]+$ ]] && (( TB_PORT >= 1 && TB_PORT <= 65535 )) || abbruch "TB_PORT ist kein gültiger Port: $TB_PORT"
 [[ "$TB_SYNC" == "0" || "$TB_SYNC" == "1" ]] || abbruch "TB_SYNC muss 0 oder 1 sein."
+[[ "$TB_APP_UPDATE" == "0" || "$TB_APP_UPDATE" == "1" ]] || abbruch "TB_APP_UPDATE muss 0 oder 1 sein."
 if [[ -n "$TB_SYNC_TOKEN" && ${#TB_SYNC_TOKEN} -lt 16 ]]; then
   abbruch "Der Zugangscode muss mindestens 16 Zeichen lang sein."
 fi
@@ -273,6 +277,55 @@ EOF
   ok "Sync-Backend läuft (Dienst $DIENST, Daten in $DATEN)"
 }
 
+# Updates aus der App: Das Backend (ohne besondere Rechte) legt nur eine Anfragedatei in
+# sein Datenverzeichnis. Die .path-Unit bemerkt sie und startet als root den Dienst unten –
+# immer denselben Befehl. Die Anfrage selbst wird nie gelesen, nur gelöscht.
+update_aus_app_einrichten() {
+  # Fortschritt und Protokoll: gehören root, das Backend liest nur mit (über seine Gruppe).
+  install -d -m 750 -o root -g truhenblick "$STATUS_VERZEICHNIS"
+
+  cat >/etc/systemd/system/truhenblick-update.service <<EOF
+[Unit]
+Description=Truhenblick aktualisieren (aus der App angestoßen)
+After=network-online.target
+
+[Service]
+Type=oneshot
+Environment=HOME=/root
+# Erst die Anfrage entfernen – sonst würde die .path-Unit den Dienst immer wieder starten.
+ExecStartPre=/bin/rm -f $DATEN/update-anfrage
+ExecStart=/usr/local/bin/truhenblick-update --aus-app
+TimeoutStartSec=30min
+EOF
+
+  cat >/etc/systemd/system/truhenblick-update.path <<EOF
+[Unit]
+Description=Truhenblick: Update-Anfragen aus der App
+
+[Path]
+PathExists=$DATEN/update-anfrage
+Unit=truhenblick-update.service
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  systemctl daemon-reload
+  systemctl enable --quiet --now truhenblick-update.path
+  ok "Updates lassen sich in der App anstoßen (abschalten: TB_APP_UPDATE=0 in $KONF)"
+}
+
+update_aus_app_entfernen() {
+  if [[ -f /etc/systemd/system/truhenblick-update.path ]]; then
+    systemctl disable --now --quiet truhenblick-update.path 2>/dev/null || true
+    rm -f /etc/systemd/system/truhenblick-update.path /etc/systemd/system/truhenblick-update.service
+    systemctl daemon-reload
+  fi
+  # Ohne das Verzeichnis meldet das Backend der App, dass hier nur von Hand aktualisiert wird.
+  rm -rf "$STATUS_VERZEICHNIS"
+  rm -f "$DATEN/update-anfrage"
+}
+
 backend_entfernen() {
   # Wurde ohne Sync installiert, darf kein alter Dienst weiterlaufen. Die Daten bleiben liegen.
   if [[ -f "/etc/systemd/system/$DIENST.service" ]]; then
@@ -364,6 +417,7 @@ TB_PORT=$TB_PORT
 TB_SYNC=$TB_SYNC
 TB_REPO=$TB_REPO
 TB_BRANCH=$TB_BRANCH
+TB_APP_UPDATE=$TB_APP_UPDATE
 EOF
   chmod 644 "$KONF"
   git -C "$QUELLE" rev-parse HEAD >"$ETC/version" 2>/dev/null || true
@@ -393,6 +447,9 @@ if [[ "$TB_SYNC" == "1" ]]; then backend_einrichten; else backend_entfernen; fi
 caddy_einrichten
 einstellungen_merken
 werkzeuge_installieren
+# Zuletzt: Das Update-Skript muss liegen und die Einstellungen müssen gespeichert sein,
+# bevor die App ein Update anstoßen kann.
+if [[ "$TB_SYNC" == "1" && "$TB_APP_UPDATE" == "1" ]]; then update_aus_app_einrichten; else update_aus_app_entfernen; fi
 
 VERSION="$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$QUELLE/package.json" | head -n1)"
 printf '\n%sTruhenblick %s ist eingerichtet.%s\n' "$FETT$GRUEN" "$VERSION" "$AUS"

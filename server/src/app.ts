@@ -3,9 +3,10 @@ import { getConnInfo } from '@hono/node-server/conninfo';
 import { Hono, type MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { cors } from 'hono/cors';
-import type { SyncAnfrage } from '../../shared/types.ts';
+import type { SyncAnfrage, UpdateStand } from '../../shared/types.ts';
 import { bereinigeArtikel, bereinigeBereich, istArtikel, istBereich } from '../../shared/validierung.ts';
 import type { Speicher } from './speicher.ts';
+import type { UpdateDienst } from './update.ts';
 
 export interface AppOptionen {
   speicher: Speicher;
@@ -15,7 +16,20 @@ export interface AppOptionen {
   version?: string;
   /** Meldungen fürs Protokoll (Standard: Konsole) */
   melde?: (text: string) => void;
+  /** Aktualisierung aus der App; ohne Angabe meldet der Server, dass sie nicht möglich ist */
+  update?: UpdateDienst;
 }
+
+const NICHT_MOEGLICH: UpdateStand = {
+  moeglich: false,
+  installiert: null,
+  verfuegbar: null,
+  neu: null,
+  geprueft: null,
+  laeuft: false,
+  letztes: null,
+  protokoll: null,
+};
 
 const MAX_ANFRAGE_BYTES = 5 * 1024 * 1024;
 const MAX_FEHLVERSUCHE = 10;
@@ -81,6 +95,7 @@ export function erstelleApp({
   corsOrigins = [],
   version = 'dev',
   melde = console.log,
+  update,
 }: AppOptionen): Hono {
   const app = new Hono();
   const zaehler = fehlversuchZaehler();
@@ -148,6 +163,7 @@ export function erstelleApp({
   };
   app.use('/api/sync', anmeldung);
   app.use('/api/code', anmeldung);
+  app.use('/api/update', anmeldung);
 
   app.post(
     '/api/sync',
@@ -177,6 +193,23 @@ export function erstelleApp({
     erwartet = codeHash;
     melde('Der Zugangscode wurde über die App neu erzeugt.');
     return c.json({ code });
+  });
+
+  // Stand der Aktualisierung; mit ?pruefen=1 wird die Quelle sofort abgefragt.
+  app.get('/api/update', async (c) => {
+    if (!update) return c.json(NICHT_MOEGLICH);
+    return c.json(await update.stand(c.req.query('pruefen') === '1'));
+  });
+
+  // Stößt das Update an. Ausgeführt wird es von einem eigenen Dienst mit root-Rechten
+  // (siehe update.ts) – diese Anfrage kann nichts daran beeinflussen außer dem Zeitpunkt.
+  app.post('/api/update', async (c) => {
+    const ergebnis = update ? await update.starte() : 'nicht-moeglich';
+    if (ergebnis === 'nicht-moeglich') {
+      return c.json({ fehler: 'Dieser Server lässt sich nicht aus der App aktualisieren.' }, 409);
+    }
+    if (ergebnis === 'gestartet') melde('Ein Update wurde aus der App angestoßen.');
+    return c.json({ gestartet: ergebnis === 'gestartet', laeuft: true }, 202);
   });
 
   app.notFound((c) => c.json({ fehler: 'Nicht gefunden.' }, 404));

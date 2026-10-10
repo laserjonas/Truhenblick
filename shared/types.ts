@@ -50,3 +50,23 @@ export interface SyncAntwort {
   bereiche: Bereich[];
   artikel: Artikel[];
 }
+
+/** Stand der Server-Aktualisierung, wie ihn GET /api/update liefert. */
+export interface UpdateStand {
+  /** Lässt sich dieser Server aus der App aktualisieren? (Nicht bei Docker.) */
+  moeglich: boolean;
+  /** Installierter Stand (Git-Commit) oder null, wenn unbekannt */
+  installiert: string | null;
+  /** Neuester Stand der Quelle oder null, wenn sie nicht erreichbar war */
+  verfuegbar: string | null;
+  /** Gibt es etwas Neues? null = konnte nicht geprüft werden */
+  neu: boolean | null;
+  /** Zeitpunkt der letzten Prüfung der Quelle */
+  geprueft: string | null;
+  /** Ein Update läuft gerade */
+  laeuft: boolean;
+  /** Ergebnis des letzten aus der App angestoßenen Updates */
+  letztes: { zustand: 'fertig' | 'fehler'; beendet: string; meldung: string } | null;
+  /** Letzte Zeilen des Protokolls – nur nach einem Fehler */
+  protokoll: string | null;
+}

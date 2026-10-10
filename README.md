@@ -237,6 +237,7 @@ hat.
 | `/var/lib/truhenblick/backups/` | automatische Sicherungen vor Updates |
 | `/etc/truhenblick/server.env` | Anfangs-Zugangscode (`SYNC_TOKEN`) und Einstellungen des Backends |
 | `/usr/local/bin/truhenblick-update` | Update-Skript |
+| `/var/lib/truhenblick-update/` | Stand und Protokoll des letzten Updates aus der App |
 
 Dienste: `systemctl status caddy` und `systemctl status truhenblick-server`, Meldungen mit
 `journalctl -u truhenblick-server`.
@@ -334,9 +335,31 @@ ein Dienst wie Tailscale mit HTTPS-Zertifikaten.
 
 | Installation | Update |
 | --- | --- |
-| Proxmox-LXC | `pct exec <ID> -- truhenblick-update` (im Container: `truhenblick-update`) |
-| Docker Compose | `git pull && docker compose --profile sync up -d --build` |
-| ohne Container | `truhenblick-update` |
+| Proxmox-LXC, ohne Container | **in der App:** *Einstellungen → Aktualisierung* – oder auf dem Server `truhenblick-update` (vom Proxmox-Host: `pct exec <ID> -- truhenblick-update`) |
+| Docker Compose | `git pull && docker compose --profile sync up -d --build`, danach in der App *Nach Updates suchen* |
+
+### In der App
+
+Unter *Einstellungen → Aktualisierung* gibt es zwei Dinge:
+
+- **Diese App:** *Nach Updates suchen* prüft, ob auf dem Server eine neuere App liegt als die geladene, und lädt
+  sie mit *App neu laden*. Das funktioniert überall, auch bei Docker und über `http://`.
+- **Server:** Ist das Gerät mit dem Sync-Backend verbunden, zeigt die App, ob es eine neue Version gibt, und
+  aktualisiert den Server mit *Jetzt aktualisieren* – derselbe Ablauf wie `truhenblick-update`, inklusive
+  Sicherung der Datenbank. Scheitert das Update, läuft die bisherige Version weiter, und die App zeigt das
+  Protokoll.
+
+Wie das abgesichert ist: Das Backend läuft ohne besondere Rechte und führt das Update nicht selbst aus. Es legt
+nur eine Anfragedatei ab; ein eigener systemd-Dienst (`truhenblick-update.path` / `.service`) startet daraufhin
+als root immer denselben Befehl – aus der Anfrage wird nichts übernommen. Anstoßen kann es jedes verbundene
+Gerät, also jeder mit dem Zugangscode. Geholt wird, was im eingestellten Repository und Zweig liegt
+(`TB_REPO`, `TB_BRANCH` in `/etc/truhenblick/install.conf`).
+
+Wer das nicht möchte, schaltet es ab – in `/etc/truhenblick/install.conf` `TB_APP_UPDATE=0` eintragen und einmal
+`truhenblick-update --force` ausführen. Bei Docker gibt es die Funktion nicht: Ein Container kann sich nicht
+selbst neu bauen.
+
+### Auf dem Server
 
 `truhenblick-update` holt die neue Version, **sichert zuerst die SQLite-Datenbank**, baut und ersetzt die App erst
 nach erfolgreichem Build. Schlägt der Build fehl, läuft die bisherige Version weiter. Die Daten in
@@ -398,7 +421,8 @@ Der Abgleich ist optional; ohne ihn arbeitet die App vollständig lokal.
   ungefähr stimmen.
 - **Zugang:** ein gemeinsamer Zugangscode für den Haushalt, übertragen als `Authorization: Bearer …`. Nach zehn
   Fehlversuchen ist eine Adresse zehn Minuten gesperrt. Der Code gehört nur über HTTPS ins Internet.
-- **Schnittstelle:** `GET /api/health` (ohne Anmeldung), `POST /api/sync` und `POST /api/code`.
+- **Schnittstelle:** `GET /api/health` (ohne Anmeldung), `POST /api/sync`, `POST /api/code` sowie
+  `GET`/`POST /api/update`.
 
 ### Zugangscode
 
@@ -468,7 +492,7 @@ npm run preview        # http://localhost:4173 – localhost gilt als sichere He
 
 ## Stand der Prüfungen
 
-Was bisher wie geprüft wurde (Stand: Version 0.1.0):
+Was bisher wie geprüft wurde (Stand: Version 0.2.0):
 
 - **App:** automatisierte Tests sowie Durchläufe im Browser (Chrome, Handy- und Desktop-Breite, hell und dunkel)
   einschließlich Offline-Betrieb und Update-Hinweis am Produktions-Build.

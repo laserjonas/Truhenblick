@@ -23,6 +23,9 @@
 
 set -Eeuo pipefail
 
+# Auch mit knapper Umgebung (pct exec, cron) alle üblichen Verzeichnisse durchsuchen
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin${PATH:+:$PATH}"
+
 REPO_STANDARD="https://github.com/laserjonas/Truhenblick.git"
 
 QUELLE=/opt/truhenblick/src
@@ -148,9 +151,9 @@ quellen_holen() {
 }
 
 app_bauen() {
-  schritt "Web-App bauen (das dauert ein bis zwei Minuten)"
+  schritt "Web-App bauen (das kann ein, zwei Minuten dauern)"
   cd "$QUELLE"
-  npm ci --no-audit --no-fund --loglevel=error
+  npm ci --no-audit --no-fund --loglevel=error >/dev/null
   # Nur bauen – die Typprüfung ist Sache der Entwicklung und spart hier Zeit und Speicher.
   npx vite build --logLevel warn
   [[ -f dist/index.html ]] || abbruch "Der Build hat keine dist/index.html erzeugt."
@@ -192,7 +195,7 @@ backend_einrichten() {
   rsync -a --delete --exclude '*.test.ts' "$QUELLE/shared/" "$APP/shared/"
   # --ignore-scripts: better-sqlite3 bringt fertige Binärdateien mit; ohne den Schalter
   # würde npm es neu kompilieren wollen, wofür im Container der Compiler fehlt.
-  npm --prefix "$APP/server" ci --omit=dev --ignore-scripts --no-audit --no-fund --loglevel=error
+  npm --prefix "$APP/server" ci --omit=dev --ignore-scripts --no-audit --no-fund --loglevel=error >/dev/null
   if ! (cd "$APP/server" && node -e "new (require('better-sqlite3'))(':memory:').close()") 2>/dev/null; then
     abbruch "Die SQLite-Bibliothek lässt sich auf diesem System nicht laden (Architektur $(uname -m)). Unterstützt werden x86-64 und ARM64 (64 Bit)."
   fi
@@ -368,6 +371,9 @@ EOF
 
 werkzeuge_installieren() {
   install -m 755 "$QUELLE/install/truhenblick-update" /usr/local/bin/truhenblick-update
+  # „pct exec“ auf dem Proxmox-Host sucht nicht in /usr/local/bin. Mit dem Verweis
+  # funktioniert dort auch der kurze Aufruf:  pct exec <ID> -- truhenblick-update
+  ln -sf /usr/local/bin/truhenblick-update /usr/bin/truhenblick-update
 }
 
 adresse() {

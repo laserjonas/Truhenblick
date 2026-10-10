@@ -12,6 +12,9 @@
 
 set -Eeuo pipefail
 
+# Auch mit knapper Umgebung (pct exec, cron) alle üblichen Verzeichnisse durchsuchen
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin${PATH:+:$PATH}"
+
 QUELLE=/opt/truhenblick/src
 DATEN=/var/lib/truhenblick
 SICHERUNGEN="$DATEN/backups"
